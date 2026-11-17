@@ -13,16 +13,16 @@ COMPANY_CONFIG = {
     "main_field": "상하수도설비공사",
     "capacity_amount": 1_850_000_000,   # 시공능력평가액 (예: 18억 5천만 원)
     "perf_3yr_amount": 1_420_000_000,   # 최근 3년 상하수도 시공실적 합계
-    "search_days_back": 21,             # 최근 21일간 공고 조회 (7일씩 분할 호출)
+    "search_days_back": 20,             # 최근 20일간 공고 조회 (5일씩 분할 호출)
 }
 
 RAW_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
 SERVICE_KEY = unquote(RAW_KEY)
 
-# 조달청 차세대 나라장터 실제 운영 엔드포인트
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch"
-BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount"
+# 조달청 나라장터 입찰공고정보서비스02 최신 엔드포인트
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
+SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch02"
+BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount02"
 
 KST = timezone(timedelta(hours=9))
 
@@ -46,7 +46,7 @@ def parse_float(val, default=0.0):
 
 
 def safe_parse_g2b_response(res: requests.Response) -> dict:
-    """조달청 API 응답(JSON 또는 XML 에러)을 안전하게 파싱합니다."""
+    """조달청 API 응답(JSON 또는 XML/게이트웨이 오류)을 안전하게 파싱합니다."""
     raw_text = res.text.strip()
     if raw_text.startswith("<"):
         try:
@@ -61,9 +61,14 @@ def safe_parse_g2b_response(res: requests.Response) -> dict:
     except Exception:
         raise RuntimeError(f"JSON 파싱 실패 (HTTP {res.status_code}): {raw_text[:300]}")
 
-    # 게이트웨이 자체 JSON 오류(response 키가 없는 경우) 방어
+    # 조달청 백엔드 자체 에러 형식(nkoneps.com.response.Body) 처리
+    if "nkoneps.com.response.Body" in data:
+        err_body = data["nkoneps.com.response.Body"]
+        raise RuntimeError(f"조달청 서버 오류 [{err_body.get('resultCode')}]: {err_body.get('resultMsg')}")
+
     if "response" not in data:
-        raise RuntimeError(f"조달청 게이트웨이 응답 오류: {json.dumps(data, ensure_ascii=False)[:300]}")
+        raise RuntimeError(f"예상치 못한 응답 형식: {json.dumps(data, ensure_ascii=False)[:300]}")
+
     return data
 
 
@@ -102,7 +107,7 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
 
 
 def query_g2b_chunk(start_dt: str, end_dt: str, region_keyword: str) -> list:
-    """7일 단위로 나라장터 공사 입찰공고 목록을 조회합니다."""
+    """7일 이하(5일 단위)로 나라장터 공사 입찰공고 목록을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -196,10 +201,11 @@ def main():
     now_kst = datetime.now(KST)
     total_days = COMPANY_CONFIG["search_days_back"]
 
+    # 조달청 7일 조회 제한 준수를 위해 5일 단위로 안전 분할 조회
     raw_map = {}
-    for offset in range(0, total_days, 7):
+    for offset in range(0, total_days, 5):
         chunk_end = now_kst - timedelta(days=offset)
-        chunk_start = now_kst - timedelta(days=min(offset + 7, total_days))
+        chunk_start = now_kst - timedelta(days=min(offset + 4, total_days))
         start_str = chunk_start.strftime("%Y%m%d0000")
         end_str = chunk_end.strftime("%Y%m%d2359")
         print(f"조회 구간: {start_str} ~ {end_str}")
