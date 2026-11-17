@@ -19,7 +19,7 @@
 
   <!-- 상단 헤더 -->
   <header class="bg-slate-900 text-white shadow-md">
-    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
       <div>
         <div class="flex items-center gap-2">
           <span id="statusBadge" class="bg-emerald-500 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded">LIVE 연동</span>
@@ -27,17 +27,71 @@
         </div>
         <p id="lastUpdatedText" class="text-xs text-slate-400 mt-1">나라장터(G2B) 데이터 불러오는 중...</p>
       </div>
-      <div class="bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
-        <div><span class="text-slate-400">업체명:</span> <strong id="companyName" class="text-white">(주)파주상하수도건설</strong></div>
-        <div><span class="text-slate-400">주력분야:</span> <strong class="text-blue-300">상하수도설비공사</strong></div>
+
+      <!-- 우리 회사 스펙 요약 + 설정 열기 버튼 -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <div><span class="text-slate-400">업체명:</span> <strong id="companyName" class="text-white">드림건설</strong></div>
         <div><span class="text-slate-400">시공능력:</span> <strong id="companyCap" class="text-emerald-400">18억 5,000만 원</strong></div>
+        <div><span class="text-slate-400">3년실적:</span> <strong id="companyPerf" class="text-blue-300">14억 2,000만 원</strong></div>
+        <div><span class="text-slate-400">신용등급:</span> <strong id="companyCredit" class="text-amber-300">BBB0</strong></div>
+        <button type="button" onclick="toggleSpecPanel()"
+          class="ml-auto bg-blue-600 hover:bg-blue-500 text-white font-bold px-2.5 py-1 rounded-lg transition">
+          ⚙️ 회사 스펙 입력
+        </button>
+      </div>
+    </div>
+
+    <!-- 접이식 우리 회사 실제 스펙 입력 패널 -->
+    <div id="specPanel" class="hidden bg-slate-800 border-t border-slate-700">
+      <div class="max-w-7xl mx-auto px-4 py-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-bold text-white">🏢 우리 회사 실제 스펙 입력 (적격심사 및 투찰 한도 실시간 재계산)</h2>
+          <button type="button" onclick="resetCompanySpecs()" class="text-xs text-slate-400 hover:text-white underline">
+            기본값으로 초기화
+          </button>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+          <div>
+            <label class="block text-slate-300 mb-1">업체명</label>
+            <input type="text" id="inputCompName" value="드림건설"
+              class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-semibold" />
+          </div>
+          <div>
+            <label class="block text-slate-300 mb-1">시공능력평가액 (원)</label>
+            <input type="text" id="inputCompCap" value="1,850,000,000"
+              class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-emerald-300 font-bold text-right" />
+          </div>
+          <div>
+            <label class="block text-slate-300 mb-1">최근 3년 상하수도 실적 (원)</label>
+            <input type="text" id="inputCompPerf" value="1,420,000,000"
+              class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-blue-300 font-bold text-right" />
+          </div>
+          <div>
+            <label class="block text-slate-300 mb-1">경영상태 신용등급</label>
+            <select id="inputCompCredit"
+              class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-amber-300 font-bold">
+              <option value="A">A- 이상 (만점)</option>
+              <option value="BBB" selected>BBB+ ~ BBB- (만점)</option>
+              <option value="BB0">BB+ ~ BB0 (만점)</option>
+              <option value="BB-">BB- (98% 인정 · 소폭감점)</option>
+              <option value="B">B+ ~ B- (95% 인정 · 감점)</option>
+              <option value="CCC">CCC+ 이하 (90% 인정)</option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button type="button" onclick="saveCompanySpecs()"
+              class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold py-2 px-4 rounded-lg transition">
+              저장 및 전체 재판정 ✓
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
 
-  <!-- 안내 알림 배너 (초기 샘플 데이터일 때만 노출) -->
+  <!-- 안내 알림 배너 -->
   <div id="fallbackBanner" class="hidden bg-amber-100 border-b border-amber-300 text-amber-950 text-xs py-2.5 px-4 text-center font-medium">
-    현재는 <strong>시연용 샘플 공고</strong>가 표시되고 있습니다. GitHub Actions에서 <code>파주 상하수도 공고 자동 수집</code>을 1회 실행하면 실제 나라장터 공고로 자동 전환됩니다.
+    현재는 <strong>시연용 샘플 공고</strong>가 표시되고 있습니다. GitHub Actions에서 <code>파주 상하수도 공고 자동 수집</code>을 실행하면 실제 나라장터 공고로 전환됩니다.
   </div>
 
   <!-- 메인 대시보드 -->
@@ -50,41 +104,38 @@
           <h2 class="font-bold text-base text-slate-900">📋 파주·경기 상하수도 공고</h2>
           <label class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer">
             <input type="checkbox" id="filterEligible" class="rounded text-blue-600 focus:ring-blue-500" />
-            참가 가능만 보기
+            참가·통과 가능만 보기
           </label>
         </div>
 
-        <!-- 검색 입력창 -->
         <div class="mb-3">
           <input type="text" id="searchInput" placeholder="공고명 또는 발주기관 검색 (예: 문산, 파주시청)"
             class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
         </div>
 
-        <!-- 요약 카운터 -->
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
           <div class="bg-blue-50 rounded-lg p-2">
-            <div class="text-xs text-blue-600 font-medium">맞춤 공고</div>
+            <div class="text-xs text-blue-600 font-medium">전체 수집</div>
             <div id="countTotal" class="text-lg font-extrabold text-blue-900">0건</div>
           </div>
           <div class="bg-emerald-50 rounded-lg p-2">
-            <div class="text-xs text-emerald-600 font-medium">참가 가능</div>
+            <div class="text-xs text-emerald-600 font-medium">통과 유력</div>
             <div id="countEligible" class="text-lg font-extrabold text-emerald-800">0건</div>
           </div>
           <div class="bg-slate-100 rounded-lg p-2">
-            <div class="text-xs text-slate-500 font-medium">능력 초과</div>
+            <div class="text-xs text-slate-500 font-medium">제외·기타</div>
             <div id="countExcluded" class="text-lg font-extrabold text-slate-600">0건</div>
           </div>
         </div>
 
-        <!-- 공고 카드 목록 -->
-        <div id="bidList" class="space-y-2.5 max-h-[620px] overflow-y-auto pr-1"></div>
+        <div id="bidList" class="space-y-2.5 max-h-[650px] overflow-y-auto pr-1"></div>
       </div>
     </section>
 
-    <!-- 우측: 공고 상세 & 투찰가 계산기 (7컬럼) -->
+    <!-- 우측: 적격심사 상세 진단 & 투찰가 계산기 (7컬럼) -->
     <section class="lg:col-span-7 space-y-5">
 
-      <!-- 1. 공고 상세 요약 카드 -->
+      <!-- 1. 공고 상세 & 적격심사·투찰한도 진단 카드 -->
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3 mb-4">
           <div class="flex-1 min-w-[220px]">
@@ -107,23 +158,27 @@
           </div>
         </div>
 
+        <!-- 적격심사 & 시공능력 정밀 진단 박스 -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-          <div class="bg-slate-50 rounded-lg p-3 border border-slate-100">
-            <div class="text-xs text-slate-500 mb-0.5">낙찰방법 / 하한율</div>
-            <div id="detailMethod" class="text-sm font-bold text-slate-800">-</div>
+          <div class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+            <div class="text-[11px] text-slate-500 mb-0.5">시공능력 한도 진단</div>
+            <div id="detailCapStatus" class="text-sm font-extrabold text-slate-900">-</div>
+            <div id="detailCapMargin" class="text-[11px] text-slate-500 mt-0.5">-</div>
           </div>
-          <div class="bg-slate-50 rounded-lg p-3 border border-slate-100">
-            <div class="text-xs text-slate-500 mb-0.5">참가가능지역</div>
-            <div id="detailRegion" class="text-sm font-bold text-slate-800">-</div>
+          <div class="bg-slate-50 rounded-lg p-3 border border-slate-200">
+            <div class="text-[11px] text-slate-500 mb-0.5">수행능력 예상점수</div>
+            <div id="detailQualScore" class="text-sm font-extrabold text-blue-700">-</div>
+            <div id="detailQualBreakdown" class="text-[11px] text-slate-500 mt-0.5">-</div>
           </div>
-          <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
-            <div class="text-xs text-emerald-700 mb-0.5">자격 진단</div>
-            <div id="detailScore" class="text-sm font-bold text-emerald-900">-</div>
+          <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+            <div class="text-[11px] text-emerald-700 mb-0.5">적격통과 최소 투찰율</div>
+            <div id="detailMinPassRate" class="text-sm font-extrabold text-emerald-900">-</div>
+            <div id="detailDeficitNote" class="text-[11px] text-emerald-700 mt-0.5">-</div>
           </div>
         </div>
 
         <div class="bg-blue-50/70 border border-blue-100 rounded-lg p-3 text-xs text-slate-700 space-y-1">
-          <div class="font-bold text-blue-900">📌 공고 핵심 요약</div>
+          <div class="font-bold text-blue-900">📌 공고 및 심사 핵심 요약</div>
           <p id="detailSummary" class="whitespace-pre-line leading-relaxed">-</p>
         </div>
       </div>
@@ -131,7 +186,7 @@
       <!-- 2. 투찰가 계산기 -->
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <h3 class="font-bold text-base text-slate-900">🎯 사정률 기반 투찰금액 계산기</h3>
+          <h3 class="font-bold text-base text-slate-900">🎯 적격심사 반영 투찰금액 계산기</h3>
           <span id="basePriceStatusBadge" class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
             확정 기초금액 반영됨
           </span>
@@ -144,8 +199,14 @@
               class="w-full font-bold text-right text-base border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-600 mb-1">낙찰하한율 (%)</label>
-            <input type="number" id="lowerRateInput" step="0.001" value="87.745"
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs font-semibold text-slate-600">적용 투찰하한율 (%)</label>
+              <button type="button" id="applyPassRateBtn" onclick="applyMinPassRate()"
+                class="text-[11px] font-bold text-blue-600 hover:underline">
+                적격통과 하한율 적용
+              </button>
+            </div>
+            <input type="number" id="lowerRateInput" step="0.001" value="89.745"
               class="w-full font-bold text-right text-base border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
           </div>
         </div>
@@ -226,7 +287,21 @@
   </main>
 
   <script>
-    // paju_bids.json 생성 전 초기 시연용 예비 데이터
+    const STORAGE_KEY = "dream_bid_company_specs_v1";
+    const CREDIT_RATIO = { A: 1.0, BBB: 1.0, BB0: 1.0, "BB-": 0.98, B: 0.95, CCC: 0.90 };
+
+    let defaultCompany = {
+      name: "드림건설",
+      capacity_amount: 1850000000,
+      perf_3yr_amount: 1420000000,
+      credit_grade: "BBB"
+    };
+
+    let currentCompany = { ...defaultCompany };
+    let allBids = [];
+    let selectedBid = null;
+    let lastDrawnRate = 100.120;
+
     const fallbackBids = [
       {
         id: "SAMPLE-001",
@@ -238,21 +313,13 @@
         presmptPrice: 258636363,
         basePrice: 284500000,
         isEstimatedBase: false,
-        lowerRate: 87.745,
-        method: "적격심사 (87.745%)",
-        score: "시공능력 충족 (공고문 실적확인)",
+        lowerRate: 89.745,
+        contractMethod: "제한경쟁",
         deadline: "2026-11-24 10:00",
         url: "https://www.g2b.go.kr",
-        eligible: true,
-        badge: "참가적합 · 추천",
-        badgeColor: "bg-emerald-100 text-emerald-800",
-        summary: "• GitHub Actions 수집이 1회 완료되면 이 샘플 대신 실제 나라장터 공고가 표시됩니다."
+        isWater: true
       }
     ];
-
-    let allBids = [];
-    let selectedBid = null;
-    let lastDrawnRate = 100.120;
 
     function formatNum(num) {
       return Math.round(num).toLocaleString('ko-KR');
@@ -263,27 +330,207 @@
     }
 
     function formatKoreanUnit(won) {
-      const eok = Math.floor(won / 100000000);
-      const man = Math.round((won % 100000000) / 10000);
-      if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만 원`;
-      if (eok > 0) return `${eok}억 원`;
-      return `${man.toLocaleString()}만 원`;
+      const sign = won < 0 ? "-" : "";
+      const absWon = Math.abs(won);
+      const eok = Math.floor(absWon / 100000000);
+      const man = Math.round((absWon % 100000000) / 10000);
+      if (eok > 0 && man > 0) return `${sign}${eok}억 ${man.toLocaleString()}만 원`;
+      if (eok > 0) return `${sign}${eok}억 원`;
+      return `${sign}${man.toLocaleString()}만 원`;
     }
 
-    // JSON 데이터 로드
+    // 클라이언트 측 적격심사 & 투찰한도 실시간 재계산 엔진
+    function evaluateBidClient(bid) {
+      const cap = currentCompany.capacity_amount;
+      const perf = currentCompany.perf_3yr_amount;
+      const grade = currentCompany.credit_grade;
+      const mgmtRatio = CREDIT_RATIO[grade] || 1.0;
+
+      const basePrice = bid.basePrice || 0;
+      const estPrice = bid.presmptPrice > 0 ? bid.presmptPrice : Math.round(basePrice / 1.1);
+      const lowerRate = bid.lowerRate || (estPrice < 1000000000 ? 89.745 : 88.745);
+      const contractMethod = bid.contractMethod || bid.method || "";
+
+      const withinCapacity = basePrice <= cap;
+      const capacityMargin = cap - basePrice;
+
+      const isSmallQuote = (estPrice < 200000000) && (
+        contractMethod.includes("수의") || bid.title.includes("견적") || estPrice < 100000000
+      );
+
+      let qual = {};
+      if (isSmallQuote) {
+        qual = {
+          withinCapacity,
+          capacityMargin,
+          evalTier: "소액수의 (적격심사 생략)",
+          maxCapScore: 0,
+          earnedCapScore: 0,
+          expDetail: "실적심사 없음",
+          mgmtDetail: "경영상태심사 없음",
+          deficit: 0,
+          minPassBidRate: lowerRate,
+          qualPass: withinCapacity,
+          scoreNote: withinCapacity ? "적격심사 생략 · 견적경쟁" : "시공능력 한도 초과"
+        };
+      } else {
+        let tierName, maxExp, maxMgmt, perfMult, priceCoeff;
+        if (estPrice < 200000000) {
+          tierName = "적격심사 (2억 미만)";
+          [maxExp, maxMgmt, perfMult, priceCoeff] = [0, 10, 0, 20];
+        } else if (estPrice < 300000000) {
+          tierName = "적격심사 (2억~3억)";
+          [maxExp, maxMgmt, perfMult, priceCoeff] = [5, 5, 0.5, 20];
+        } else if (estPrice < 1000000000) {
+          tierName = "적격심사 (3억~10억)";
+          [maxExp, maxMgmt, perfMult, priceCoeff] = [10, 10, estPrice < 400000000 ? 0.5 : 1.0, 20];
+        } else {
+          tierName = "적격심사 (10억~50억)";
+          [maxExp, maxMgmt, perfMult, priceCoeff] = [15, 15, 2.0, 4];
+        }
+
+        let earnedExp = 0;
+        let expDetail = "해당없음";
+        if (maxExp > 0) {
+          const reqPerf = Math.max(basePrice * perfMult, 1);
+          const ratio = perf / reqPerf;
+          const factor = ratio >= 1.0 ? 1.0 : ratio >= 0.7 ? 0.9 : ratio >= 0.4 ? 0.8 : ratio >= 0.2 ? 0.7 : 0.6;
+          earnedExp = Number((maxExp * factor).toFixed(2));
+          expDetail = `${earnedExp}/${maxExp}점 (기준실적 대비 ${Math.min(Math.round(ratio * 100), 999)}%)`;
+        }
+
+        const earnedMgmt = Number((maxMgmt * mgmtRatio).toFixed(2));
+        const mgmtDetail = `${earnedMgmt}/${maxMgmt}점 (${grade}등급)`;
+        const maxCap = Number((maxExp + maxMgmt).toFixed(2));
+        const earnedCap = Number((earnedExp + earnedMgmt).toFixed(2));
+        const deficit = Number((maxCap - earnedCap).toFixed(2));
+
+        let minPassRate, qualPass, scoreNote;
+        if (deficit > 5.0) {
+          minPassRate = 90.000;
+          qualPass = false;
+          scoreNote = `수행능력 ${earnedCap}/${maxCap}점 (점수미달 불가)`;
+        } else {
+          minPassRate = Number((lowerRate + deficit / priceCoeff).toFixed(3));
+          qualPass = withinCapacity;
+          scoreNote = deficit === 0
+            ? `수행능력 ${earnedCap}/${maxCap}점 만점 (하한율 통과)`
+            : `수행능력 ${earnedCap}/${maxCap}점 (-${deficit}점 → ${minPassRate}% 이상)`;
+        }
+
+        qual = {
+          withinCapacity,
+          capacityMargin,
+          evalTier: tierName,
+          maxCapScore: maxCap,
+          earnedCapScore: earnedCap,
+          expDetail,
+          mgmtDetail,
+          deficit,
+          minPassBidRate: minPassRate,
+          qualPass,
+          scoreNote
+        };
+      }
+
+      const eligible = bid.isWater && qual.withinCapacity && qual.qualPass;
+      let badge, badgeColor;
+      if (!bid.isWater) {
+        badge = "파주 기타공사";
+        badgeColor = "bg-slate-200 text-slate-600";
+      } else if (!qual.withinCapacity) {
+        badge = "시공능력 초과";
+        badgeColor = "bg-rose-100 text-rose-700";
+      } else if (!qual.qualPass) {
+        badge = "적격점수 미달";
+        badgeColor = "bg-rose-100 text-rose-700";
+      } else if (qual.evalTier.includes("소액수의")) {
+        badge = "상하수도 · 소액수의";
+        badgeColor = "bg-blue-100 text-blue-800";
+      } else if (qual.deficit > 0) {
+        badge = "상하수도 · 투찰상향";
+        badgeColor = "bg-amber-100 text-amber-800";
+      } else {
+        badge = "상하수도 · 추천";
+        badgeColor = "bg-emerald-100 text-emerald-800";
+      }
+
+      const summary = [
+        `• 발주처: ${bid.agency} / 계약방법: ${contractMethod}`,
+        `• 참가가능지역: ${bid.region} / 주력분야: ${bid.mainField}`,
+        `• 심사구분: ${qual.evalTier} | 시공경험: ${qual.expDetail} | 경영상태: ${qual.mgmtDetail}`,
+        bid.isEstimatedBase ? "• ※ 아직 확정 기초금액이 공개되지 않아 추정가격(×1.1) 기준으로 계산기에 세팅되었습니다." : ""
+      ].filter(Boolean).join("\n");
+
+      return { ...bid, qual, eligible, badge, badgeColor, summary };
+    }
+
+    function updateCompanyHeaderUI() {
+      document.getElementById('companyName').textContent = currentCompany.name;
+      document.getElementById('companyCap').textContent = formatKoreanUnit(currentCompany.capacity_amount);
+      document.getElementById('companyPerf').textContent = formatKoreanUnit(currentCompany.perf_3yr_amount);
+      document.getElementById('companyCredit').textContent = currentCompany.credit_grade;
+
+      document.getElementById('inputCompName').value = currentCompany.name;
+      document.getElementById('inputCompCap').value = formatNum(currentCompany.capacity_amount);
+      document.getElementById('inputCompPerf').value = formatNum(currentCompany.perf_3yr_amount);
+      document.getElementById('inputCompCredit').value = currentCompany.credit_grade;
+    }
+
+    function toggleSpecPanel() {
+      document.getElementById('specPanel').classList.toggle('hidden');
+    }
+
+    function saveCompanySpecs() {
+      currentCompany = {
+        name: document.getElementById('inputCompName').value.trim() || "드림건설",
+        capacity_amount: parseNum(document.getElementById('inputCompCap').value),
+        perf_3yr_amount: parseNum(document.getElementById('inputCompPerf').value),
+        credit_grade: document.getElementById('inputCompCredit').value
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(currentCompany));
+      updateCompanyHeaderUI();
+      recalculateAllBids();
+      document.getElementById('specPanel').classList.add('hidden');
+    }
+
+    function resetCompanySpecs() {
+      localStorage.removeItem(STORAGE_KEY);
+      currentCompany = { ...defaultCompany };
+      updateCompanyHeaderUI();
+      recalculateAllBids();
+    }
+
+    function recalculateAllBids() {
+      allBids = allBids.map(evaluateBidClient);
+      allBids.sort((a, b) => (b.eligible - a.eligible) || (b.isWater - a.isWater) || b.bidNo.localeCompare(a.bidNo));
+      updateCounters();
+      renderBidList();
+      if (selectedBid) {
+        const refreshed = allBids.find(b => b.id === selectedBid.id) || allBids[0];
+        if (refreshed) selectBid(refreshed.id);
+      } else if (allBids.length > 0) {
+        selectBid(allBids[0].id);
+      }
+    }
+
     async function initDashboard() {
       try {
         const res = await fetch(`./paju_bids.json?t=${Date.now()}`);
-        if (!res.ok) throw new Error("JSON 파일 없음");
+        if (!res.ok) throw new Error("JSON 없음");
         const data = await res.json();
 
         allBids = Array.isArray(data.bids) ? data.bids : [];
         document.getElementById('lastUpdatedText').textContent =
-          `최근 자동 수집: ${data.updated_at || '방금 전'} (전체 ${data.total_scanned || 0}건 스캔 완료)`;
+          `최근 자동 수집: ${data.updated_at || '방금 전'} (경기·파주 ${data.total_scanned || 0}건 스캔 완료)`;
 
         if (data.company) {
-          document.getElementById('companyName').textContent = data.company.name;
-          document.getElementById('companyCap').textContent = formatKoreanUnit(data.company.capacity_amount);
+          defaultCompany = {
+            name: data.company.name || "드림건설",
+            capacity_amount: data.company.capacity_amount || 1850000000,
+            perf_3yr_amount: data.company.perf_3yr_amount || 1420000000,
+            credit_grade: (data.company.credit_grade || "BBB").replace(/[0+-]/g, '') || "BBB"
+          };
         }
       } catch (err) {
         allBids = fallbackBids;
@@ -293,11 +540,19 @@
         document.getElementById('fallbackBanner').classList.remove('hidden');
       }
 
-      updateCounters();
-      renderBidList();
-      if (allBids.length > 0) {
-        selectBid(allBids[0].id);
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          currentCompany = { ...defaultCompany, ...JSON.parse(saved) };
+        } catch (e) {
+          currentCompany = { ...defaultCompany };
+        }
+      } else {
+        currentCompany = { ...defaultCompany };
       }
+
+      updateCompanyHeaderUI();
+      recalculateAllBids();
       runLottery();
     }
 
@@ -361,6 +616,7 @@
       if (!selectedBid) return;
       renderBidList();
 
+      const q = selectedBid.qual;
       document.getElementById('detailBadge').className = `text-xs font-bold px-2 py-0.5 rounded ${selectedBid.badgeColor}`;
       document.getElementById('detailBadge').textContent = selectedBid.badge;
       document.getElementById('detailAgency').textContent = selectedBid.agency;
@@ -368,10 +624,41 @@
       document.getElementById('detailTitle').textContent = selectedBid.title;
       document.getElementById('detailDeadline').textContent = selectedBid.deadline;
       document.getElementById('detailUrl').href = selectedBid.url || 'https://www.g2b.go.kr';
-      document.getElementById('detailMethod').textContent = selectedBid.method;
-      document.getElementById('detailRegion').textContent = selectedBid.region;
-      document.getElementById('detailScore').textContent = selectedBid.score;
       document.getElementById('detailSummary').textContent = selectedBid.summary;
+
+      // 1) 시공능력 한도 카드
+      const capStatusEl = document.getElementById('detailCapStatus');
+      if (q.withinCapacity) {
+        capStatusEl.textContent = "한도 내 (투찰 가능)";
+        capStatusEl.className = "text-sm font-extrabold text-emerald-700";
+        document.getElementById('detailCapMargin').textContent = `잔여 여력: +${formatKoreanUnit(q.capacityMargin)}`;
+      } else {
+        capStatusEl.textContent = "시공능력 한도 초과";
+        capStatusEl.className = "text-sm font-extrabold text-rose-600";
+        document.getElementById('detailCapMargin').textContent = `초과액: ${formatKoreanUnit(q.capacityMargin)}`;
+      }
+
+      // 2) 수행능력 예상점수 카드
+      if (q.maxCapScore === 0) {
+        document.getElementById('detailQualScore').textContent = "적격심사 생략 (소액수의)";
+        document.getElementById('detailQualBreakdown').textContent = "실적·경영상태 점수 미평가";
+      } else {
+        document.getElementById('detailQualScore').textContent = `${q.earnedCapScore} / ${q.maxCapScore}점`;
+        document.getElementById('detailQualBreakdown').textContent = `경험 ${q.expDetail.split(' ')[0]} · 경영 ${q.mgmtDetail.split(' ')[0]}`;
+      }
+
+      // 3) 적격통과 최소 투찰율 카드
+      const minPassEl = document.getElementById('detailMinPassRate');
+      if (!q.qualPass && q.deficit > 5) {
+        minPassEl.textContent = "점수 미달 (통과 불가)";
+        minPassEl.className = "text-sm font-extrabold text-rose-600";
+        document.getElementById('detailDeficitNote').textContent = `수행능력 -${q.deficit}점 감점 초과`;
+      } else {
+        minPassEl.textContent = `${q.minPassBidRate.toFixed(3)}% 이상`;
+        minPassEl.className = "text-sm font-extrabold text-emerald-900";
+        document.getElementById('detailDeficitNote').textContent =
+          q.deficit > 0 ? `감점 -${q.deficit}점 보완 상향 적용` : `기본 하한율(${selectedBid.lowerRate}%) 통과`;
+      }
 
       const baseBadge = document.getElementById('basePriceStatusBadge');
       if (selectedBid.isEstimatedBase) {
@@ -383,7 +670,13 @@
       }
 
       document.getElementById('basePriceInput').value = formatNum(selectedBid.basePrice);
-      document.getElementById('lowerRateInput').value = selectedBid.lowerRate || 87.745;
+      document.getElementById('lowerRateInput').value = q.minPassBidRate.toFixed(3);
+      calculateBid();
+    }
+
+    function applyMinPassRate() {
+      if (!selectedBid) return;
+      document.getElementById('lowerRateInput').value = selectedBid.qual.minPassBidRate.toFixed(3);
       calculateBid();
     }
 
@@ -448,6 +741,13 @@
       btn.textContent = '복사 완료! ✓';
       setTimeout(() => btn.textContent = '투찰금액 복사하기', 1500);
     }
+
+    ['inputCompCap', 'inputCompPerf'].forEach(id => {
+      document.getElementById(id).addEventListener('input', (e) => {
+        const num = parseNum(e.target.value);
+        e.target.value = num ? formatNum(num) : '';
+      });
+    });
 
     document.getElementById('filterEligible').addEventListener('change', renderBidList);
     document.getElementById('searchInput').addEventListener('input', renderBidList);
