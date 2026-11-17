@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -13,13 +14,12 @@ COMPANY_CONFIG = {
     "main_field": "상하수도설비공사",
     "capacity_amount": 1_850_000_000,   # 시공능력평가액 (예: 18억 5천만 원)
     "perf_3yr_amount": 1_420_000_000,   # 최근 3년 상하수도 시공실적 합계
-    "search_days_back": 20,             # 최근 20일간 공고 조회 (5일씩 분할 호출)
+    "search_days_back": 25,             # 최근 25일간 공고 조회 (5일씩 분할 호출)
 }
 
 RAW_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
 SERVICE_KEY = unquote(RAW_KEY)
 
-# 조달청 나라장터 입찰공고정보서비스02 최신 엔드포인트
 BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
 SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch02"
 BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount02"
@@ -46,7 +46,6 @@ def parse_float(val, default=0.0):
 
 
 def safe_parse_g2b_response(res: requests.Response) -> dict:
-    """조달청 API 응답(JSON 또는 XML/게이트웨이 오류)을 안전하게 파싱합니다."""
     raw_text = res.text.strip()
     if raw_text.startswith("<"):
         try:
@@ -61,7 +60,6 @@ def safe_parse_g2b_response(res: requests.Response) -> dict:
     except Exception:
         raise RuntimeError(f"JSON 파싱 실패 (HTTP {res.status_code}): {raw_text[:300]}")
 
-    # 조달청 백엔드 자체 에러 형식(nkoneps.com.response.Body) 처리
     if "nkoneps.com.response.Body" in data:
         err_body = data["nkoneps.com.response.Body"]
         raise RuntimeError(f"조달청 서버 오류 [{err_body.get('resultCode')}]: {err_body.get('resultMsg')}")
@@ -106,29 +104,43 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
     return 0
 
 
-def query_g2b_chunk(start_dt: str, end_dt: str, region_keyword: str) -> list:
-    """7일 이하(5일 단위)로 나라장터 공사 입찰공고 목록을 조회합니다."""
-    params = {
-        "serviceKey": SERVICE_KEY,
-        "type": "json",
-        "numOfRows": "200",
-        "pageNo": "1",
-        "inqryDiv": "1",
-        "inqryBgnDt": start_dt,
-        "inqryEndDt": end_dt,
-        "prtcptPsblRgnNm": region_keyword,
-    }
-    res = requests.get(SEARCH_ENDPOINT, params=params, timeout=20)
-    payload = safe_parse_g2b_response(res)
+def query_g2b_all_pages(start_dt: str, end_dt: str) -> list:
+    """지역 파라미터 제한 없이 해당 기간의 전체 공사 공고를 페이지 끝까지 수집합니다."""
+    collected = []
+    page_no = 1
+    num_of_rows = 500
 
-    header = payload.get("response", {}).get("header", {})
-    if header.get("resultCode") != "00":
-        raise RuntimeError(f"G2B API 오류 [{header.get('resultCode')}]: {header.get('resultMsg')}")
+    while page_no <= 15:
+        params = {
+            "serviceKey": SERVICE_KEY,
+            "type": "json",
+            "numOfRows": str(num_of_rows),
+            "pageNo": str(page_no),
+            "inqryDiv": "1",
+            "inqryBgnDt": start_dt,
+            "inqryEndDt": end_dt,
+        }
+        res = requests.get(SEARCH_ENDPOINT, params=params, timeout=25)
+        payload = safe_parse_g2b_response(res)
 
-    return normalize_items(payload)
+        header = payload.get("response", {}).get("header", {})
+        if header.get("resultCode") != "00":
+            raise RuntimeError(f"G2B API 오류 [{header.get('resultCode')}]: {header.get('resultMsg')}")
+
+        body = payload.get("response", {}).get("body", {})
+        total_count = parse_number(body.get("totalCount"), 0)
+        items = normalize_items(payload)
+        collected.extend(items)
+
+        total_pages = math.ceil(total_count / num_of_rows) if total_count > 0 else 1
+        if page_no >= total_pages or not items:
+            break
+        page_no += 1
+
+    return collected
 
 
-def evaluate_bid(item: dict, basis_amount: int) -> dict:
+def evaluate_bid(item: dict, basis_amount: int, is_water: bool) -> dict:
     bid_no = item.get("bidNtceNo", "")
     bid_ord = item.get("bidNtceOrd", "000")
     title = item.get("bidNtceNm", "제목 없음")
@@ -147,24 +159,31 @@ def evaluate_bid(item: dict, basis_amount: int) -> dict:
     calc_base_price = round(presmpt_price * 1.1) if is_estimated_base else basis_amount
 
     capacity = COMPANY_CONFIG["capacity_amount"]
-    is_eligible = calc_base_price <= capacity
+    within_capacity = calc_base_price <= capacity
 
-    if not is_eligible:
-        badge = "시공능력 초과 · 제외"
+    # 상하수도 공고이면서 시공능력 이내인 건을 '참가적합(eligible)'으로 최상단 노출
+    is_eligible = is_water and within_capacity
+
+    if not is_water:
+        badge = "파주 기타공사"
         badge_color = "bg-slate-200 text-slate-600"
+        score_note = "타 업종 공고 (상하수도 외)"
+    elif not within_capacity:
+        badge = "시공능력 초과"
+        badge_color = "bg-rose-100 text-rose-700"
         score_note = f"시공능력({capacity // 10000:,}만 원) 초과"
     elif presmpt_price < 200_000_000 and ("수의" in contract_method or "견적" in title):
-        badge = "소액수의 · 추천"
+        badge = "상하수도 · 소액수의"
         badge_color = "bg-blue-100 text-blue-800"
         score_note = "적격심사 생략 (견적 경쟁)"
     else:
-        badge = "참가적합 · 추천"
+        badge = "상하수도 · 추천"
         badge_color = "bg-emerald-100 text-emerald-800"
         score_note = "시공능력 충족 (공고문 실적확인)"
 
     summary_parts = [
         f"• 발주처: {agency} / 계약방법: {contract_method}",
-        f"• 참가가능지역: {region} / 주력분야: {main_field if main_field else '상하수도설비(공고문 확인)'}",
+        f"• 참가가능지역: {region} / 주력분야: {main_field if main_field else '공고문 면허제한 확인'}",
     ]
     if is_estimated_base:
         summary_parts.append("• ※ 아직 확정 기초금액이 공개되지 않아 추정가격(×1.1) 기준으로 계산기에 자동 세팅되었습니다.")
@@ -175,7 +194,7 @@ def evaluate_bid(item: dict, basis_amount: int) -> dict:
         "title": title,
         "agency": agency,
         "region": region,
-        "mainField": main_field if main_field else "상하수도설비공사",
+        "mainField": main_field if main_field else "공고문 확인",
         "presmptPrice": presmpt_price,
         "basePrice": calc_base_price,
         "isEstimatedBase": is_estimated_base,
@@ -187,6 +206,7 @@ def evaluate_bid(item: dict, basis_amount: int) -> dict:
         "openDate": item.get("opengDt", ""),
         "url": item.get("bidNtceDtlUrl") or "https://www.g2b.go.kr",
         "eligible": is_eligible,
+        "isWater": is_water,
         "badge": badge,
         "badgeColor": badge_color,
         "summary": "\n".join(summary_parts),
@@ -195,27 +215,28 @@ def evaluate_bid(item: dict, basis_amount: int) -> dict:
 
 def main():
     if not SERVICE_KEY:
-        raise ValueError("환경변수 G2B_SERVICE_KEY가 비어 있습니다. GitHub Secrets 이름을 확인하세요.")
+        raise ValueError("환경변수 G2B_SERVICE_KEY가 비어 있습니다.")
 
-    print(f"인증키 로드 완료 (길이: {len(SERVICE_KEY)}자)")
     now_kst = datetime.now(KST)
     total_days = COMPANY_CONFIG["search_days_back"]
 
-    # 조달청 7일 조회 제한 준수를 위해 5일 단위로 안전 분할 조회
     raw_map = {}
     for offset in range(0, total_days, 5):
         chunk_end = now_kst - timedelta(days=offset)
         chunk_start = now_kst - timedelta(days=min(offset + 4, total_days))
         start_str = chunk_start.strftime("%Y%m%d0000")
         end_str = chunk_end.strftime("%Y%m%d2359")
-        print(f"조회 구간: {start_str} ~ {end_str}")
 
-        for kw in ["경기", "파주"]:
-            for item in query_g2b_chunk(start_str, end_str, kw):
-                key = f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"
-                raw_map[key] = item
+        chunk_items = query_g2b_all_pages(start_str, end_str)
+        print(f"조회 구간 {start_str} ~ {end_str}: {len(chunk_items)}건 수신")
+        for item in chunk_items:
+            key = f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"
+            raw_map[key] = item
 
-    water_keywords = ["상하수도", "상수도", "하수도", "관로", "급수", "배수관", "오수", "우수", "맨홀", "송수관"]
+    water_keywords = [
+        "상하수도", "상수도", "하수도", "관로", "급수", "배수", "오수", "우수",
+        "맨홀", "송수", "정수", "누수", "펌프", "가압장", "관거", "용수로", "하수처리"
+    ]
     matched_bids = []
 
     for key, item in raw_map.items():
@@ -226,19 +247,24 @@ def main():
         site = item.get("cnstrtsiteRgnNm", "")
         main_field = item.get("indstrytyMfrcFldNm", "")
 
+        # 파주시 관련 공고인지 확인
         is_paju = any("파주" in str(t) for t in [region, agency, demand, site, title])
         if not is_paju:
             continue
 
+        # 상하수도 관련 공고인지 판별
         is_water = ("상하수도" in str(main_field)) or any(w in str(title) for w in water_keywords)
-        if not is_water:
-            continue
 
         basis_amt = get_basis_amount(item.get("bidNtceNo", ""), item.get("bidNtceOrd", "000"))
-        matched_bids.append(evaluate_bid(item, basis_amt))
+        matched_bids.append(evaluate_bid(item, basis_amt, is_water))
 
-    matched_bids.sort(key=lambda x: x["bidNo"], reverse=True)
+    # 1순위: 상하수도 적합 공고 -> 2순위: 상하수도 초과 공고 -> 3순위: 파주 기타공사 -> 최신순
+    matched_bids.sort(
+        key=lambda x: (x["eligible"], x["isWater"], x["bidNo"]),
+        reverse=True
+    )
 
+    water_cnt = sum(1 for b in matched_bids if b["isWater"])
     output_data = {
         "updated_at": now_kst.strftime("%Y-%m-%d %H:%M"),
         "company": COMPANY_CONFIG,
@@ -249,7 +275,7 @@ def main():
     with open("paju_bids.json", "w", encoding="utf-8") as f:
         json.dump(output_data, f, ensure_ascii=False, indent=2)
 
-    print(f"수집 완료: 전체 {len(raw_map)}건 스캔 -> 파주 상하수도 맞춤 공고 {len(matched_bids)}건 저장됨.")
+    print(f"수집 완료: 전국 {len(raw_map)}건 스캔 -> 파주 전체 {len(matched_bids)}건 (상하수도 {water_cnt}건) 저장됨.")
 
 
 if __name__ == "__main__":
