@@ -2,6 +2,7 @@ import json
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote
 import requests
 
 # ==============================================================================
@@ -12,15 +13,17 @@ COMPANY_CONFIG = {
     "main_field": "상하수도설비공사",
     "capacity_amount": 1_850_000_000,   # 시공능력평가액 (예: 18억 5천만 원)
     "perf_3yr_amount": 1_420_000_000,   # 최근 3년 상하수도 시공실적 합계
-    "search_days_back": 30,             # 최근 30일간 공고 조회
+    "search_days_back": 21,             # 최근 21일간 공고 조회 (7일씩 분할 호출)
 }
 
-SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
+# Encoding/Decoding 어느 쪽 키를 등록했든 requests가 중복 인코딩하지 않도록 정규화
+RAW_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
+SERVICE_KEY = unquote(RAW_KEY)
 
-# 공공데이터포털 마이페이지 -> 상세기능정보 -> 미리보기 URL의 앞부분과 일치해야 합니다.
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch"
-BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount"
+# 최신 조달청 나라장터 입찰공고정보서비스02 엔드포인트
+BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
+SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch02"
+BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount02"
 
 KST = timezone(timedelta(hours=9))
 
@@ -44,7 +47,7 @@ def parse_float(val, default=0.0):
 
 
 def safe_parse_g2b_response(res: requests.Response) -> dict:
-    """조달청 API가 JSON이 아닌 XML 에러를 반환할 때 정확한 사유를 출력합니다."""
+    """조달청 API 응답(JSON 또는 XML 에러)을 안전하게 파싱합니다."""
     raw_text = res.text.strip()
     if raw_text.startswith("<"):
         try:
@@ -73,6 +76,7 @@ def normalize_items(payload: dict) -> list:
 
 
 def get_basis_amount(bid_no: str, bid_ord: str) -> int:
+    """공고번호로 확정 기초금액(bssamt)을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -93,7 +97,8 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
     return 0
 
 
-def query_g2b_notices(start_dt: str, end_dt: str, region_keyword: str) -> list:
+def query_g2b_chunk(start_dt: str, end_dt: str, region_keyword: str) -> list:
+    """7일 이하 단위로 나라장터 공사 입찰공고 목록을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -183,16 +188,23 @@ def main():
     if not SERVICE_KEY:
         raise ValueError("환경변수 G2B_SERVICE_KEY가 비어 있습니다. GitHub Secrets 이름을 확인하세요.")
 
-    print(f"인증키 로드 확인 완료 (길이: {len(SERVICE_KEY)}자)")
+    print(f"인증키 로드 완료 (길이: {len(SERVICE_KEY)}자)")
     now_kst = datetime.now(KST)
-    start_dt = (now_kst - timedelta(days=COMPANY_CONFIG["search_days_back"])).strftime("%Y%m%d0000")
-    end_dt = now_kst.strftime("%Y%m%d2359")
+    total_days = COMPANY_CONFIG["search_days_back"]
 
+    # 조회기간 제한 대응: 7일 단위로 분할하여 조회
     raw_map = {}
-    for kw in ["경기", "파주"]:
-        for item in query_g2b_notices(start_dt, end_dt, kw):
-            key = f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"
-            raw_map[key] = item
+    for offset in range(0, total_days, 7):
+        chunk_end = now_kst - timedelta(days=offset)
+        chunk_start = now_kst - timedelta(days=min(offset + 7, total_days))
+        start_str = chunk_start.strftime("%Y%m%d0000")
+        end_str = chunk_end.strftime("%Y%m%d2359")
+        print(f"조회 구간: {start_str} ~ {end_str}")
+
+        for kw in ["경기", "파주"]:
+            for item in query_g2b_chunk(start_str, end_str, kw):
+                key = f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"
+                raw_map[key] = item
 
     water_keywords = ["상하수도", "상수도", "하수도", "관로", "급수", "배수관", "오수", "우수", "맨홀", "송수관"]
     matched_bids = []
