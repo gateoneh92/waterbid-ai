@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote
@@ -14,7 +15,7 @@ COMPANY_CONFIG = {
     "main_field": "상하수도설비공사",
     "capacity_amount": 1_850_000_000,   # 시공능력평가액 (예: 18억 5천만 원)
     "perf_3yr_amount": 1_420_000_000,   # 최근 3년 상하수도 시공실적 합계
-    "search_days_back": 25,             # 최근 25일간 공고 조회 (5일씩 분할 호출)
+    "search_days_back": 14,             # 최근 14일간 공고 조회 (속도 최적화)
 }
 
 RAW_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
@@ -25,6 +26,7 @@ SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch02"
 BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount02"
 
 KST = timezone(timedelta(hours=9))
+SESSION = requests.Session()
 
 
 def parse_number(val, default=0):
@@ -83,7 +85,7 @@ def normalize_items(payload: dict) -> list:
 
 
 def get_basis_amount(bid_no: str, bid_ord: str) -> int:
-    """공고번호로 확정 기초금액(bssamt)을 조회합니다."""
+    """파주 매칭 공고에 대해서만 확정 기초금액(bssamt)을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -94,7 +96,7 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
         "pageNo": "1",
     }
     try:
-        res = requests.get(BASIS_ENDPOINT, params=params, timeout=10)
+        res = SESSION.get(BASIS_ENDPOINT, params=params, timeout=6)
         payload = safe_parse_g2b_response(res)
         items = normalize_items(payload)
         if items:
@@ -104,13 +106,13 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
     return 0
 
 
-def query_g2b_all_pages(start_dt: str, end_dt: str) -> list:
-    """지역 파라미터 제한 없이 해당 기간의 전체 공사 공고를 페이지 끝까지 수집합니다."""
+def query_g2b_region_chunk(start_dt: str, end_dt: str, official_region: str) -> list:
+    """공식 행정구역명('경기도', '경기도 파주시')으로 5일 단위 공사 공고를 빠르게 조회합니다."""
     collected = []
     page_no = 1
-    num_of_rows = 500
+    num_of_rows = 300
 
-    while page_no <= 15:
+    while page_no <= 5:
         params = {
             "serviceKey": SERVICE_KEY,
             "type": "json",
@@ -119,8 +121,9 @@ def query_g2b_all_pages(start_dt: str, end_dt: str) -> list:
             "inqryDiv": "1",
             "inqryBgnDt": start_dt,
             "inqryEndDt": end_dt,
+            "prtcptPsblRgnNm": official_region,
         }
-        res = requests.get(SEARCH_ENDPOINT, params=params, timeout=25)
+        res = SESSION.get(SEARCH_ENDPOINT, params=params, timeout=12)
         payload = safe_parse_g2b_response(res)
 
         header = payload.get("response", {}).get("header", {})
@@ -160,8 +163,6 @@ def evaluate_bid(item: dict, basis_amount: int, is_water: bool) -> dict:
 
     capacity = COMPANY_CONFIG["capacity_amount"]
     within_capacity = calc_base_price <= capacity
-
-    # 상하수도 공고이면서 시공능력 이내인 건을 '참가적합(eligible)'으로 최상단 노출
     is_eligible = is_water and within_capacity
 
     if not is_water:
@@ -214,12 +215,14 @@ def evaluate_bid(item: dict, basis_amount: int, is_water: bool) -> dict:
 
 
 def main():
+    t0 = time.time()
     if not SERVICE_KEY:
         raise ValueError("환경변수 G2B_SERVICE_KEY가 비어 있습니다.")
 
     now_kst = datetime.now(KST)
     total_days = COMPANY_CONFIG["search_days_back"]
 
+    # 최근 14일을 5일 단위 3구간으로 분할 + 공식 지역명 2개만 조회
     raw_map = {}
     for offset in range(0, total_days, 5):
         chunk_end = now_kst - timedelta(days=offset)
@@ -227,11 +230,11 @@ def main():
         start_str = chunk_start.strftime("%Y%m%d0000")
         end_str = chunk_end.strftime("%Y%m%d2359")
 
-        chunk_items = query_g2b_all_pages(start_str, end_str)
-        print(f"조회 구간 {start_str} ~ {end_str}: {len(chunk_items)}건 수신")
-        for item in chunk_items:
-            key = f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"
-            raw_map[key] = item
+        for official_region in ["경기도", "경기도 파주시"]:
+            items = query_g2b_region_chunk(start_str, end_str, official_region)
+            for item in items:
+                key = f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"
+                raw_map[key] = item
 
     water_keywords = [
         "상하수도", "상수도", "하수도", "관로", "급수", "배수", "오수", "우수",
@@ -247,18 +250,14 @@ def main():
         site = item.get("cnstrtsiteRgnNm", "")
         main_field = item.get("indstrytyMfrcFldNm", "")
 
-        # 파주시 관련 공고인지 확인
         is_paju = any("파주" in str(t) for t in [region, agency, demand, site, title])
         if not is_paju:
             continue
 
-        # 상하수도 관련 공고인지 판별
         is_water = ("상하수도" in str(main_field)) or any(w in str(title) for w in water_keywords)
-
         basis_amt = get_basis_amount(item.get("bidNtceNo", ""), item.get("bidNtceOrd", "000"))
         matched_bids.append(evaluate_bid(item, basis_amt, is_water))
 
-    # 1순위: 상하수도 적합 공고 -> 2순위: 상하수도 초과 공고 -> 3순위: 파주 기타공사 -> 최신순
     matched_bids.sort(
         key=lambda x: (x["eligible"], x["isWater"], x["bidNo"]),
         reverse=True
@@ -275,7 +274,8 @@ def main():
     with open("paju_bids.json", "w", encoding="utf-8") as f:
         json.dump(output_data, f, ensure_ascii=False, indent=2)
 
-    print(f"수집 완료: 전국 {len(raw_map)}건 스캔 -> 파주 전체 {len(matched_bids)}건 (상하수도 {water_cnt}건) 저장됨.")
+    elapsed = time.time() - t0
+    print(f"수집 완료 ({elapsed:.1f}초 소요): 경기/파주 {len(raw_map)}건 스캔 -> 파주 공고 {len(matched_bids)}건 (상하수도 {water_cnt}건) 저장됨.")
 
 
 if __name__ == "__main__":
