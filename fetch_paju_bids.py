@@ -16,14 +16,13 @@ COMPANY_CONFIG = {
     "search_days_back": 21,             # 최근 21일간 공고 조회 (7일씩 분할 호출)
 }
 
-# Encoding/Decoding 어느 쪽 키를 등록했든 requests가 중복 인코딩하지 않도록 정규화
 RAW_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
 SERVICE_KEY = unquote(RAW_KEY)
 
-# 최신 조달청 나라장터 입찰공고정보서비스02 엔드포인트
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
-SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch02"
-BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount02"
+# 조달청 차세대 나라장터 실제 운영 엔드포인트
+BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch"
+BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount"
 
 KST = timezone(timedelta(hours=9))
 
@@ -58,14 +57,19 @@ def safe_parse_g2b_response(res: requests.Response) -> dict:
         except ET.ParseError:
             raise RuntimeError(f"조달청 API 비정상 응답 (HTTP {res.status_code}): {raw_text[:300]}")
     try:
-        return res.json()
+        data = res.json()
     except Exception:
         raise RuntimeError(f"JSON 파싱 실패 (HTTP {res.status_code}): {raw_text[:300]}")
+
+    # 게이트웨이 자체 JSON 오류(response 키가 없는 경우) 방어
+    if "response" not in data:
+        raise RuntimeError(f"조달청 게이트웨이 응답 오류: {json.dumps(data, ensure_ascii=False)[:300]}")
+    return data
 
 
 def normalize_items(payload: dict) -> list:
     body = payload.get("response", {}).get("body", {})
-    if not body:
+    if not body or not isinstance(body, dict):
         return []
     items = body.get("items", [])
     if not items:
@@ -98,7 +102,7 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
 
 
 def query_g2b_chunk(start_dt: str, end_dt: str, region_keyword: str) -> list:
-    """7일 이하 단위로 나라장터 공사 입찰공고 목록을 조회합니다."""
+    """7일 단위로 나라장터 공사 입찰공고 목록을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -192,7 +196,6 @@ def main():
     now_kst = datetime.now(KST)
     total_days = COMPANY_CONFIG["search_days_back"]
 
-    # 조회기간 제한 대응: 7일 단위로 분할하여 조회
     raw_map = {}
     for offset in range(0, total_days, 7):
         chunk_end = now_kst - timedelta(days=offset)
