@@ -1,5 +1,6 @@
 import json
 import os
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 import requests
 
@@ -11,12 +12,12 @@ COMPANY_CONFIG = {
     "main_field": "상하수도설비공사",
     "capacity_amount": 1_850_000_000,   # 시공능력평가액 (예: 18억 5천만 원)
     "perf_3yr_amount": 1_420_000_000,   # 최근 3년 상하수도 시공실적 합계
-    "search_days_back": 14,             # 최근 며칠간의 공고를 조회할지 설정
+    "search_days_back": 30,             # 최근 30일간 공고 조회
 }
 
-# 공공데이터포털 Decoding 인증키 (GitHub Secrets에서 자동 로드)
 SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "").strip()
 
+# 공공데이터포털 마이페이지 -> 상세기능정보 -> 미리보기 URL의 앞부분과 일치해야 합니다.
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 SEARCH_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkPPSSrch"
 BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount"
@@ -42,6 +43,23 @@ def parse_float(val, default=0.0):
         return default
 
 
+def safe_parse_g2b_response(res: requests.Response) -> dict:
+    """조달청 API가 JSON이 아닌 XML 에러를 반환할 때 정확한 사유를 출력합니다."""
+    raw_text = res.text.strip()
+    if raw_text.startswith("<"):
+        try:
+            root = ET.fromstring(raw_text)
+            err_msg = root.findtext(".//returnAuthMsg") or root.findtext(".//resultMsg") or raw_text[:300]
+            err_code = root.findtext(".//returnReasonCode") or root.findtext(".//resultCode") or "XML_ERROR"
+            raise RuntimeError(f"조달청 API 오류 [{err_code}]: {err_msg}")
+        except ET.ParseError:
+            raise RuntimeError(f"조달청 API 비정상 응답 (HTTP {res.status_code}): {raw_text[:300]}")
+    try:
+        return res.json()
+    except Exception:
+        raise RuntimeError(f"JSON 파싱 실패 (HTTP {res.status_code}): {raw_text[:300]}")
+
+
 def normalize_items(payload: dict) -> list:
     body = payload.get("response", {}).get("body", {})
     if not body:
@@ -55,7 +73,6 @@ def normalize_items(payload: dict) -> list:
 
 
 def get_basis_amount(bid_no: str, bid_ord: str) -> int:
-    """공고번호로 확정 기초금액(bssamt)을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -67,17 +84,16 @@ def get_basis_amount(bid_no: str, bid_ord: str) -> int:
     }
     try:
         res = requests.get(BASIS_ENDPOINT, params=params, timeout=10)
-        res.raise_for_status()
-        items = normalize_items(res.json())
+        payload = safe_parse_g2b_response(res)
+        items = normalize_items(payload)
         if items:
             return parse_number(items[0].get("bssamt"), 0)
     except Exception as e:
-        print(f"[경고] 기초금액 조회 실패 ({bid_no}-{bid_ord}): {e}")
+        print(f"[참고] 기초금액 조회 생략 ({bid_no}-{bid_ord}): {e}")
     return 0
 
 
 def query_g2b_notices(start_dt: str, end_dt: str, region_keyword: str) -> list:
-    """특정 지역 키워드로 나라장터 공사 입찰공고 목록을 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -89,8 +105,7 @@ def query_g2b_notices(start_dt: str, end_dt: str, region_keyword: str) -> list:
         "prtcptPsblRgnNm": region_keyword,
     }
     res = requests.get(SEARCH_ENDPOINT, params=params, timeout=20)
-    res.raise_for_status()
-    payload = res.json()
+    payload = safe_parse_g2b_response(res)
 
     header = payload.get("response", {}).get("header", {})
     if header.get("resultCode") != "00":
@@ -100,7 +115,6 @@ def query_g2b_notices(start_dt: str, end_dt: str, region_keyword: str) -> list:
 
 
 def evaluate_bid(item: dict, basis_amount: int) -> dict:
-    """개별 공고를 분석해 웹 대시보드용 구조로 변환합니다."""
     bid_no = item.get("bidNtceNo", "")
     bid_ord = item.get("bidNtceOrd", "000")
     title = item.get("bidNtceNm", "제목 없음")
@@ -115,11 +129,9 @@ def evaluate_bid(item: dict, basis_amount: int) -> dict:
     if lower_rate <= 0:
         lower_rate = 87.745
 
-    # 기초금액 미공개 시 추정가격 * 1.1(부가세 포함)을 임시 계산용 기초금액으로 사용
     is_estimated_base = basis_amount <= 0
     calc_base_price = round(presmpt_price * 1.1) if is_estimated_base else basis_amount
 
-    # 참가 가능 여부 진단 (시공능력평가액 기준)
     capacity = COMPANY_CONFIG["capacity_amount"]
     is_eligible = calc_base_price <= capacity
 
@@ -169,15 +181,13 @@ def evaluate_bid(item: dict, basis_amount: int) -> dict:
 
 def main():
     if not SERVICE_KEY:
-        raise ValueError("환경변수 G2B_SERVICE_KEY가 설정되지 않았습니다. GitHub Secrets를 확인하세요.")
+        raise ValueError("환경변수 G2B_SERVICE_KEY가 비어 있습니다. GitHub Secrets 이름을 확인하세요.")
 
+    print(f"인증키 로드 확인 완료 (길이: {len(SERVICE_KEY)}자)")
     now_kst = datetime.now(KST)
     start_dt = (now_kst - timedelta(days=COMPANY_CONFIG["search_days_back"])).strftime("%Y%m%d0000")
     end_dt = now_kst.strftime("%Y%m%d2359")
 
-    print(f"[{now_kst.strftime('%Y-%m-%d %H:%M:%S')}] 나라장터 파주 상하수도 공고 수집 시작...")
-
-    # '경기'와 '파주' 두 키워드로 조회 후 공고번호 기준 중복 제거
     raw_map = {}
     for kw in ["경기", "파주"]:
         for item in query_g2b_notices(start_dt, end_dt, kw):
@@ -195,12 +205,10 @@ def main():
         site = item.get("cnstrtsiteRgnNm", "")
         main_field = item.get("indstrytyMfrcFldNm", "")
 
-        # 1) 파주 관련 공고 필터
         is_paju = any("파주" in str(t) for t in [region, agency, demand, site, title])
         if not is_paju:
             continue
 
-        # 2) 상하수도 주력분야 또는 공고명 키워드 필터
         is_water = ("상하수도" in str(main_field)) or any(w in str(title) for w in water_keywords)
         if not is_water:
             continue
@@ -208,7 +216,6 @@ def main():
         basis_amt = get_basis_amount(item.get("bidNtceNo", ""), item.get("bidNtceOrd", "000"))
         matched_bids.append(evaluate_bid(item, basis_amt))
 
-    # 최신 공고순(공고번호 역순) 정렬
     matched_bids.sort(key=lambda x: x["bidNo"], reverse=True)
 
     output_data = {
