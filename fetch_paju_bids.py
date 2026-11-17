@@ -32,6 +32,12 @@ PAJU_KEYWORDS = (
     "광탄면", "탄현면", "월롱면", "적성면", "파평면", "장단면",
     "야당동", "와동동", "목동동", "동패동", "다율동", "금릉", "봉일천", "선유리", "출판단지"
 )
+GYEONGGI_KEYWORDS = (
+    "경기", "수원", "고양", "용인", "성남", "화성", "부천", "남양주", "안산",
+    "평택", "안양", "시흥", "김포", "의정부", "광주", "하남", "광명", "군포",
+    "양주", "오산", "이천", "안성", "구리", "의왕", "포천", "양평", "여주",
+    "동두천", "과천", "가평", "연천"
+)
 WATER_KEYWORDS = (
     "상하수도", "상수도", "하수도", "관로", "급수", "배수", "오수", "우수관",
     "우수받이", "맨홀", "송수", "정수장", "누수", "가압장", "관거", "용수로",
@@ -41,6 +47,10 @@ WATER_KEYWORDS = (
 OTHER_TRADE_KEYWORDS = (
     "전기공사", "정보통신공사", "소방시설공사", "조경식재", "조경시설물",
     "실내건축", "도장공사", "방수공사", "승강기", "기계설비공사"
+)
+A_VALUE_FIELDS = (
+    "npnInsrprm", "mrfnHealthInsrprm", "odsnLngtrmRcprInsrprm",
+    "rtrmzPayDdcAmt", "sftyMngmAmt", "qltyMngmAmt", "sftyChckMngmAmt"
 )
 
 
@@ -119,7 +129,8 @@ def fetch_period_all(start_dt: str, end_dt: str) -> list:
     return items
 
 
-def fetch_basis_amount(bid_no: str, bid_ord: str) -> int:
+def fetch_basis_info(bid_no: str, bid_ord: str) -> tuple[int, int]:
+    """기초금액(bssamt)과 A값 항목 합계를 함께 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -131,9 +142,14 @@ def fetch_basis_amount(bid_no: str, bid_ord: str) -> int:
     }
     try:
         items = extract_items(parse_g2b_json(SESSION.get(BASIS_ENDPOINT, params=params, timeout=8)))
-        return parse_num(items[0].get("bssamt")) if items else 0
+        if not items:
+            return 0, 0
+        row = items[0]
+        basis = parse_num(row.get("bssamt"))
+        a_val = sum(max(parse_num(row.get(f)), 0) for f in A_VALUE_FIELDS)
+        return basis, a_val
     except Exception:
-        return 0
+        return 0, 0
 
 
 def is_closed(deadline_str: str, now_kst: datetime) -> bool:
@@ -169,40 +185,52 @@ def main():
             for item in fut.result():
                 raw_map[f"{item.get('bidNtceNo')}-{item.get('bidNtceOrd', '000')}"] = item
 
-    # 1차 필터: 파주 관련 공고 추출
-    paju_items = []
+    # 1차 선별: (1) 파주시 관내 모든 공고 OR (2) 경기도·전국 참가가능 상하수도 공고
+    candidates = []
     for key, item in raw_map.items():
+        title = str(item.get("bidNtceNm", "제목 없음"))
+        region = str(item.get("prtcptPsblRgnNm") or "").strip()
         loc_text = " ".join(
             str(item.get(k, "")) for k in ("bidNtceNm", "ntceInsttNm", "dminsttNm", "prtcptPsblRgnNm", "cnstrtsiteRgnNm")
         )
-        if any(kw in loc_text for kw in PAJU_KEYWORDS):
-            closed = is_closed(item.get("bidClseDt", ""), now_kst)
-            paju_items.append((key, item, closed))
-
-    # 2차 조회: 마감되지 않은 진행 공고만 기초금액 조회 (API 호출 최소화)
-    open_items = [(k, it) for k, it, closed in paju_items if not closed]
-    basis_map = {}
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        fut_to_key = {
-            pool.submit(fetch_basis_amount, it.get("bidNtceNo", ""), it.get("bidNtceOrd", "000")): k
-            for k, it in open_items
-        }
-        for fut in as_completed(fut_to_key):
-            basis_map[fut_to_key[fut]] = fut.result()
-
-    # 3차 정제: 프론트엔드용 경량 데이터 구성
-    bids = []
-    for key, item, closed in paju_items:
-        title = str(item.get("bidNtceNm", "제목 없음"))
-        field_text = f"{item.get('indstrytyMfrcFldNm', '')} {item.get('pubPrcrmntClsfcNm', '')}".strip()
+        field_text = " ".join(
+            str(item.get(k, "")) for k in ("indstrytyMfrcFldNm", "pubPrcrmntClsfcNm", "lcnsLmtNm")
+        ).strip()
         work_text = f"{title} {field_text}"
+
+        is_paju_local = any(kw in loc_text for kw in PAJU_KEYWORDS)
+        is_gyeonggi_area = is_paju_local or any(kw in loc_text for kw in GYEONGGI_KEYWORDS)
+        region_allowed = (not region) or any(ok in region for ok in ("파주", "경기", "전국"))
 
         is_water = ("상하수도" in field_text) or (
             any(w in work_text for w in WATER_KEYWORDS) and not any(ot in field_text for ot in OTHER_TRADE_KEYWORDS)
         )
 
+        # 파주 관내 공고이거나, 경기도 권역에서 투찰 가능한 상하수도 공고면 포함
+        if is_paju_local or (is_water and is_gyeonggi_area and region_allowed):
+            closed = is_closed(item.get("bidClseDt", ""), now_kst)
+            candidates.append((key, item, closed, is_water, is_paju_local))
+
+    # 2차 조회: 진행 중인 공고만 기초금액 및 A값 병렬 조회
+    open_candidates = [(k, it) for k, it, closed, _, _ in candidates if not closed]
+    basis_map = {}
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        fut_to_key = {
+            pool.submit(fetch_basis_info, it.get("bidNtceNo", ""), it.get("bidNtceOrd", "000")): k
+            for k, it in open_candidates
+        }
+        for fut in as_completed(fut_to_key):
+            basis_map[fut_to_key[fut]] = fut.result()
+
+    # 3차 정제: 프론트엔드용 경량 데이터 생성
+    bids = []
+    for key, item, closed, is_water, is_paju_local in candidates:
+        title = str(item.get("bidNtceNm", "제목 없음"))
+        field_text = " ".join(
+            str(item.get(k, "")) for k in ("indstrytyMfrcFldNm", "pubPrcrmntClsfcNm", "lcnsLmtNm")
+        ).strip()
         presmpt = parse_num(item.get("presmptPrce"))
-        basis = basis_map.get(key, 0)
+        basis, a_val = basis_map.get(key, (0, 0))
         is_est_base = basis <= 0
         default_lower = 89.745 if presmpt < 1_000_000_000 else 88.745
         lower_rate = parse_num(item.get("sucsfbidLwltRate"), as_float=True, default=default_lower) or default_lower
@@ -216,6 +244,7 @@ def main():
             "mainField": field_text or "공고문 확인",
             "presmptPrice": presmpt,
             "basePrice": round(presmpt * 1.1) if is_est_base else basis,
+            "aValue": a_val,
             "isEstimatedBase": is_est_base,
             "lowerRate": lower_rate,
             "contractMethod": item.get("cntrctCnclsMthdNm") or "입찰방식 확인",
@@ -223,9 +252,10 @@ def main():
             "isClosed": closed,
             "url": item.get("bidNtceDtlUrl") or "https://www.g2b.go.kr",
             "isWater": is_water,
+            "isPajuLocal": is_paju_local,
         })
 
-    bids.sort(key=lambda x: (not x["isClosed"], x["isWater"], x["bidNo"]), reverse=True)
+    bids.sort(key=lambda x: (not x["isClosed"], x["isWater"], x["isPajuLocal"], x["bidNo"]), reverse=True)
     water_cnt = sum(1 for b in bids if b["isWater"])
     open_water_cnt = sum(1 for b in bids if b["isWater"] and not b["isClosed"])
 
@@ -239,7 +269,7 @@ def main():
 
     print(
         f"수집 완료 ({time.time() - t0:.1f}초): 전국 {len(raw_map)}건 -> "
-        f"파주 {len(bids)}건 (상하수도 {water_cnt}건 / 진행중 {open_water_cnt}건)"
+        f"파주·경기 대상 {len(bids)}건 (상하수도 {water_cnt}건 / 진행중 {open_water_cnt}건)"
     )
 
 
