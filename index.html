@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>파주 상하수도 맞춤형 입찰 분석 시스템</title>
+  <title>파주·경기 상하수도 맞춤형 입찰 분석 시스템</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -22,7 +22,7 @@
       <div>
         <div class="flex items-center gap-2">
           <span id="statusBadge" class="bg-emerald-500 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded">LIVE 연동</span>
-          <h1 class="text-lg md:text-xl font-bold tracking-tight">파주 상하수도 스마트 입찰 지원 시스템</h1>
+          <h1 class="text-lg md:text-xl font-bold tracking-tight">파주·경기 상하수도 스마트 입찰 지원 시스템</h1>
         </div>
         <p id="lastUpdatedText" class="text-xs text-slate-400 mt-1">나라장터(G2B) 데이터 불러오는 중...</p>
       </div>
@@ -95,7 +95,7 @@
     <section class="lg:col-span-5 flex flex-col gap-4">
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <h2 class="font-bold text-base text-slate-900">📋 파주·인근 상하수도 공고</h2>
+          <h2 class="font-bold text-base text-slate-900">📋 파주·경기 입찰 공고</h2>
           <div class="flex items-center gap-3">
             <label class="inline-flex items-center gap-1 text-xs font-medium text-slate-600 cursor-pointer">
               <input type="checkbox" id="hideClosed" checked class="rounded text-blue-600 focus:ring-blue-500" />
@@ -103,17 +103,24 @@
             </label>
             <label class="inline-flex items-center gap-1 text-xs font-medium text-slate-600 cursor-pointer">
               <input type="checkbox" id="filterEligible" class="rounded text-blue-600 focus:ring-blue-500" />
-              상하수도 적합만
+              입찰가능만
             </label>
           </div>
         </div>
 
-        <input type="text" id="searchInput" placeholder="공고명 또는 발주기관 검색 (예: 문산, 운정, 파주시청)"
-          class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 mb-3 focus:outline-none focus:border-blue-500" />
+        <div class="grid grid-cols-3 gap-1.5 mb-2.5 text-xs">
+          <select id="areaFilter" class="col-span-1 border border-slate-300 rounded-lg px-2 py-2 bg-slate-50 font-semibold text-slate-700 focus:outline-none focus:border-blue-500">
+            <option value="all">전체(파주+경기)</option>
+            <option value="paju">파주 관내만</option>
+            <option value="gyeonggi">경기도 관외만</option>
+          </select>
+          <input type="text" id="searchInput" placeholder="공고명·지역·발주처 검색 (예: 수원, 문산)"
+            class="col-span-2 text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+        </div>
 
         <div class="grid grid-cols-3 gap-2 mb-4 text-center">
           <div class="bg-blue-50 rounded-lg p-2">
-            <div class="text-xs text-blue-600 font-medium">파주 전체</div>
+            <div class="text-xs text-blue-600 font-medium">수집 전체</div>
             <div id="countTotal" class="text-lg font-extrabold text-blue-900">0건</div>
           </div>
           <div class="bg-emerald-50 rounded-lg p-2">
@@ -178,30 +185,35 @@
         </div>
       </div>
 
-      <!-- 투찰가 계산기 -->
+      <!-- 투찰가 계산기 (A값 반영) -->
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <h3 class="font-bold text-base text-slate-900">🎯 적격심사 반영 투찰금액 계산기</h3>
+          <h3 class="font-bold text-base text-slate-900">🎯 적격심사·A값 반영 투찰금액 계산기</h3>
           <span id="basePriceStatusBadge" class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
             확정 기초금액 반영됨
           </span>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">기초금액 (원)</label>
-            <input type="text" id="basePriceInput" value="200,000,000"
-              class="w-full font-bold text-right text-base border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+            <input type="text" id="basePriceInput" value="387,700,000"
+              class="w-full font-bold text-right text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">A값 (국민연금·건강보험 등)</label>
+            <input type="text" id="aValueInput" value="0" placeholder="공고문 A값 입력"
+              class="w-full font-bold text-right text-sm text-indigo-700 border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
           </div>
           <div>
             <div class="flex items-center justify-between mb-1">
-              <label class="text-xs font-semibold text-slate-600">적용 투찰하한율 (%)</label>
+              <label class="text-xs font-semibold text-slate-600">투찰하한율 (%)</label>
               <button type="button" onclick="applyMinPassRate()" class="text-[11px] font-bold text-blue-600 hover:underline">
-                적격통과 하한율 적용
+                통과율 적용
               </button>
             </div>
             <input type="number" id="lowerRateInput" step="0.001" value="89.745"
-              class="w-full font-bold text-right text-base border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+              class="w-full font-bold text-right text-sm border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
           </div>
         </div>
 
@@ -209,13 +221,13 @@
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs font-bold text-slate-700">목표 사정률 조절</span>
             <div class="flex items-center gap-1">
-              <input type="number" id="rateNumberInput" step="0.005" min="97" max="103" value="100.150"
+              <input type="number" id="rateNumberInput" step="0.005" min="97" max="103" value="100.000"
                 class="w-24 text-right font-extrabold text-blue-700 text-lg bg-white border border-blue-300 rounded px-2 py-0.5" />
               <span class="font-bold text-blue-700">%</span>
             </div>
           </div>
 
-          <input type="range" id="rateSlider" min="97.000" max="103.000" step="0.005" value="100.150"
+          <input type="range" id="rateSlider" min="97.000" max="103.000" step="0.005" value="100.000"
             class="w-full h-2 bg-slate-300 rounded-lg appearance-none cursor-pointer my-2" />
 
           <div class="flex justify-between text-[11px] text-slate-400 mb-3">
@@ -228,18 +240,21 @@
             <button type="button" onclick="setRate(99.850)" class="text-xs bg-white hover:bg-slate-100 border border-slate-300 rounded-md px-2.5 py-1 font-medium">
               보수적 (99.850%)
             </button>
-            <button type="button" onclick="setRate(100.150)" class="text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-md px-2.5 py-1 font-semibold">
-              지자체 평균권 (100.150%)
+            <button type="button" onclick="setRate(100.000)" class="text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-md px-2.5 py-1 font-semibold">
+              기준점 (100.000%)
             </button>
-            <button type="button" onclick="setRate(100.400)" class="text-xs bg-white hover:bg-slate-100 border border-slate-300 rounded-md px-2.5 py-1 font-medium">
-              상향 투찰 (100.400%)
+            <button type="button" onclick="setRate(100.250)" class="text-xs bg-white hover:bg-slate-100 border border-slate-300 rounded-md px-2.5 py-1 font-medium">
+              상향 투찰 (100.250%)
             </button>
           </div>
         </div>
 
         <div class="bg-slate-900 text-white rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div class="text-xs text-slate-400">예상 예정가격: <span id="expectedPriceText" class="text-slate-200 font-semibold">0원</span></div>
+            <div class="text-xs text-slate-400">
+              예상 예정가격: <span id="expectedPriceText" class="text-slate-200 font-semibold">0원</span>
+              <span id="aValueFormulaNote" class="text-indigo-300 ml-1"></span>
+            </div>
             <div class="text-xs text-blue-300 mt-1 font-semibold">최종 권장 투찰금액 (원 단위 절상)</div>
             <div id="finalBidText" class="text-2xl sm:text-3xl font-extrabold text-emerald-400 tracking-tight mt-0.5">0 원</div>
           </div>
@@ -286,15 +301,15 @@
     let currentCompany = { ...defaultCompany };
     let allBids = [];
     let selectedBid = null;
-    let lastDrawnRate = 100.120;
+    let lastDrawnRate = 100.000;
 
     const fallbackBids = [{
-      id: "SAMPLE-001", bidNo: "20261117001-00",
-      title: "[샘플] 문산읍 선유리 일원 노후 상수관로 정비공사",
-      agency: "파주시청 상하수도과", region: "경기도 파주시", mainField: "상하수도설비공사",
-      presmptPrice: 258636363, basePrice: 284500000, isEstimatedBase: false,
-      lowerRate: 89.745, contractMethod: "제한경쟁", deadline: "2026-11-24 10:00",
-      isClosed: false, url: "https://www.g2b.go.kr", isWater: true
+      id: "R26BK01823121-000", bidNo: "R26BK01823121-000",
+      title: "[샘플] 중로2-291호선 노후 하수관로 교체공사",
+      agency: "경기도 수원시 권선구", region: "경기도", mainField: "상하수도설비공사",
+      presmptPrice: 352454546, basePrice: 387700000, aValue: 31611896, isEstimatedBase: false,
+      lowerRate: 89.745, contractMethod: "제한경쟁", deadline: "2026-11-19 10:00",
+      isClosed: false, url: "https://www.g2b.go.kr", isWater: true, isPajuLocal: false
     }];
 
     const formatNum = num => Math.round(num).toLocaleString('ko-KR');
@@ -380,6 +395,7 @@
       const r = String(bid.region || "").trim();
       const regionAllowed = !r || r === "공고문 참조" || r.includes("파주") || r.includes("경기") || r.includes("전국");
       const eligible = bid.isWater && regionAllowed && qual.withinCapacity && qual.qualPass && !isClosed;
+      const areaPrefix = bid.isPajuLocal ? "파주" : "경기";
 
       const [badge, badgeColor] =
         isClosed ? ["투찰마감", "bg-slate-200 text-slate-500"] :
@@ -387,15 +403,16 @@
         !bid.isWater ? ["파주 기타공사", "bg-slate-200 text-slate-600"] :
         !qual.withinCapacity ? ["시공능력 초과", "bg-rose-100 text-rose-700"] :
         !qual.qualPass ? ["적격점수 미달", "bg-rose-100 text-rose-700"] :
-        qual.evalTier.includes("소액수의") ? ["상하수도 · 소액수의", "bg-blue-100 text-blue-800"] :
-        qual.deficit > 0 ? ["상하수도 · 투찰상향", "bg-amber-100 text-amber-800"] :
-        ["상하수도 · 추천", "bg-emerald-100 text-emerald-800"];
+        qual.evalTier.includes("소액수의") ? [`${areaPrefix} · 소액수의`, "bg-blue-100 text-blue-800"] :
+        qual.deficit > 0 ? [`${areaPrefix} · 투찰상향`, "bg-amber-100 text-amber-800"] :
+        [`${areaPrefix} · 입찰가능`, "bg-emerald-100 text-emerald-800"];
 
       const summary = [
         `• 발주처: ${bid.agency} / 계약방법: ${method}`,
         `• 참가가능지역: ${bid.region} / 업종·분류: ${bid.mainField}`,
         `• 심사구분: ${qual.evalTier} | 시공경험: ${qual.expDetail} | 경영상태: ${qual.mgmtDetail}`,
-        bid.isEstimatedBase ? "• ※ 아직 확정 기초금액이 공개되지 않아 추정가격(×1.1) 기준으로 자동 세팅되었습니다." : ""
+        bid.aValue > 0 ? `• 자동 확인된 A값 합계: ${formatNum(bid.aValue)}원 (계산기 자동 반영됨)` : "• ※ 공고문에 A값(국민연금·건강보험료 등)이 있다면 계산기 A값 칸에 입력해 주세요.",
+        bid.isEstimatedBase ? "• ※ 확정 기초금액 미공개로 추정가격(×1.1) 기준 자동 환산됨" : ""
       ].filter(Boolean).join("\n");
 
       return { ...bid, isClosed, qual, eligible, badge, badgeColor, summary };
@@ -439,11 +456,13 @@
     function getFilteredBids() {
       const hideClosed = $('hideClosed').checked;
       const onlyEligible = $('filterEligible').checked;
+      const area = $('areaFilter').value;
       const kw = $('searchInput').value.trim().toLowerCase();
       return allBids.filter(b =>
         (!hideClosed || !b.isClosed) &&
         (!onlyEligible || b.eligible) &&
-        (!kw || `${b.title} ${b.agency} ${b.region}`.toLowerCase().includes(kw))
+        (area === "all" || (area === "paju" ? b.isPajuLocal : !b.isPajuLocal)) &&
+        (!kw || `${b.title} ${b.agency} ${b.region} ${b.bidNo}`.toLowerCase().includes(kw))
       );
     }
 
@@ -451,6 +470,7 @@
       allBids = allBids.map(evaluateBidClient).sort((a, b) =>
         (Number(a.isClosed) - Number(b.isClosed)) ||
         (Number(b.eligible) - Number(a.eligible)) ||
+        (Number(b.isPajuLocal) - Number(a.isPajuLocal)) ||
         (Number(b.isWater) - Number(a.isWater)) ||
         b.bidNo.localeCompare(a.bidNo)
       );
@@ -470,7 +490,7 @@
       const filtered = getFilteredBids();
       const listEl = $('bidList');
       if (!filtered.length) {
-        listEl.innerHTML = `<div class="text-center py-10 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">선택한 필터 조건에 해당하는 공고가 없습니다.<br/>상단 체크박스를 해제하면 전체 공고를 볼 수 있습니다.</div>`;
+        listEl.innerHTML = `<div class="text-center py-10 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">선택한 필터 조건에 해당하는 공고가 없습니다.<br/>상단 필터를 변경하면 다른 공고를 볼 수 있습니다.</div>`;
         return;
       }
 
@@ -483,7 +503,7 @@
           <div onclick="selectBid('${bid.id}')" class="p-3.5 rounded-xl border transition cursor-pointer ${style}">
             <div class="flex items-center justify-between gap-2 mb-1">
               <span class="text-[11px] font-bold px-2 py-0.5 rounded ${bid.badgeColor}">${bid.badge}</span>
-              <span class="text-[11px] text-slate-400 font-medium truncate max-w-[140px]">${bid.agency}</span>
+              <span class="text-[11px] text-slate-400 font-medium truncate max-w-[160px]">${bid.agency}</span>
             </div>
             <div class="font-bold text-sm text-slate-900 mb-1.5 leading-snug">${bid.title}</div>
             <div class="flex items-center justify-between text-xs text-slate-600">
@@ -527,6 +547,7 @@
       $('basePriceStatusBadge').className = `text-xs font-semibold px-2.5 py-1 rounded-full ${selectedBid.isEstimatedBase ? 'text-amber-800 bg-amber-100' : 'text-emerald-700 bg-emerald-50'}`;
 
       $('basePriceInput').value = formatNum(selectedBid.basePrice);
+      $('aValueInput').value = formatNum(selectedBid.aValue || 0);
       $('lowerRateInput').value = q.minPassBidRate.toFixed(3);
       calculateBid();
     }
@@ -539,11 +560,18 @@
 
     function calculateBid() {
       const base = parseNum($('basePriceInput').value);
+      const aVal = parseNum($('aValueInput').value);
       const lower = parseFloat($('lowerRateInput').value) || 0;
       const rate = parseFloat($('rateNumberInput').value) || 100;
+
       const expected = Math.round(base * (rate / 100));
+      const finalBid = aVal > 0
+        ? Math.ceil((expected - aVal) * (lower / 100) + aVal)
+        : Math.ceil(expected * (lower / 100));
+
       $('expectedPriceText').textContent = `${formatNum(expected)}원`;
-      $('finalBidText').textContent = `${formatNum(Math.ceil(expected * (lower / 100)))} 원`;
+      $('aValueFormulaNote').textContent = aVal > 0 ? `(A값 ${formatNum(aVal)}원 반영)` : '';
+      $('finalBidText').textContent = `${formatNum(finalBid)} 원`;
     }
 
     function setRate(val) {
@@ -598,15 +626,15 @@
         currentCompany = { ...defaultCompany };
       }
 
-      ['inputCompCap', 'inputCompPerf', 'basePriceInput'].forEach(id => {
+      ['inputCompCap', 'inputCompPerf', 'basePriceInput', 'aValueInput'].forEach(id => {
         $(id).addEventListener('input', e => {
           const n = parseNum(e.target.value);
           e.target.value = n ? formatNum(n) : '';
-          if (id === 'basePriceInput') calculateBid();
+          if (id === 'basePriceInput' || id === 'aValueInput') calculateBid();
         });
       });
 
-      ['hideClosed', 'filterEligible'].forEach(id => $(id).addEventListener('change', renderBidList));
+      ['hideClosed', 'filterEligible', 'areaFilter'].forEach(id => $(id).addEventListener('change', renderBidList));
       $('searchInput').addEventListener('input', renderBidList);
       $('lowerRateInput').addEventListener('input', calculateBid);
       $('rateSlider').addEventListener('input', e => setRate(e.target.value));
