@@ -151,4 +151,246 @@ def fetch_page(endpoint: str, extra_params: dict, page_no: int, rows: int = 500)
     return extract_items(payload), total
 
 
-def fetch_all_pages(endpoint: str, extra_params: dict, max_pages
+def fetch_all_pages(endpoint: str, extra_params: dict, max_pages: int = 25) -> list:
+    rows = 500
+    try:
+        items, total = fetch_page(endpoint, extra_params, 1, rows)
+    except Exception as e:
+        print(f"[경고] 조회 실패 ({endpoint.split('/')[-1]}): {e}")
+        return []
+
+    if total <= rows or not items:
+        return items
+
+    total_pages = min(math.ceil(total / rows), max_pages)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = [pool.submit(fetch_page, endpoint, extra_params, p, rows) for p in range(2, total_pages + 1)]
+        for fut in as_completed(futures):
+            try:
+                items.extend(fut.result()[0])
+            except Exception:
+                pass
+    return items
+
+
+def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
+    """기초금액, A값 합계, 참가가능지역, 업종제한사항을 조회합니다."""
+    base_params = {
+        "serviceKey": SERVICE_KEY,
+        "type": "json",
+        "inqryDiv": "2",
+        "bidNtceNo": bid_no,
+        "bidNtceOrd": bid_ord,
+        "numOfRows": "10",
+        "pageNo": "1",
+    }
+    basis, a_val = 0, 0
+    regions, licenses = [], []
+
+    try:
+        b_items = extract_items(parse_g2b_json(SESSION.get(BASIS_ENDPOINT, params=base_params, timeout=8)))
+        if b_items:
+            row = b_items[0]
+            basis = parse_num(row.get("bssamt"))
+            a_val = sum(max(parse_num(row.get(f)), 0) for f in A_VALUE_FIELDS)
+    except Exception:
+        pass
+
+    try:
+        r_items = extract_items(parse_g2b_json(SESSION.get(REGION_ENDPOINT, params=base_params, timeout=8)))
+        for r in r_items:
+            reg = str(r.get("prtcptPsblRgnNm") or "").strip()
+            if reg and reg not in regions:
+                regions.append(reg)
+    except Exception:
+        pass
+
+    try:
+        l_items = extract_items(parse_g2b_json(SESSION.get(LICENSE_ENDPOINT, params=base_params, timeout=8)))
+        for r in l_items:
+            lic = str(r.get("lcnsLmtNm") or "").strip()
+            if lic and lic not in licenses:
+                licenses.append(lic)
+    except Exception:
+        pass
+
+    return basis, a_val, ", ".join(regions), ", ".join(licenses)
+
+
+def is_region_allowed_for_paju(region_str: str) -> bool:
+    """파주시 소재 업체가 입찰 가능한 지역제한인지 판정"""
+    r = str(region_str or "").strip()
+    if not r or r in ("공고문 참조", "제한없음"):
+        return True
+    if any(other in r for other in OTHER_PROVINCE_KEYWORDS):
+        return False
+    tokens = [t.strip() for t in re.split(r"[,/]", r) if t.strip()]
+    for tok in tokens:
+        if "전국" in tok or "파주" in tok or tok in ("경기도", "경기"):
+            return True
+    return False
+
+
+def is_closed(deadline_str: str, now_kst: datetime) -> bool:
+    digits = "".join(ch for ch in str(deadline_str or "") if ch.isdigit())
+    try:
+        if len(digits) >= 12:
+            return datetime.strptime(digits[:12], "%Y%m%d%H%M").replace(tzinfo=KST) < now_kst
+        if len(digits) == 8:
+            return datetime.strptime(digits + "2359", "%Y%m%d%H%M").replace(tzinfo=KST) < now_kst
+    except ValueError:
+        pass
+    return False
+
+
+def main():
+    t0 = time.time()
+    if not SERVICE_KEY:
+        raise ValueError("환경변수 G2B_SERVICE_KEY가 비어 있습니다.")
+
+    now_kst = datetime.now(KST)
+    days = COMPANY_CONFIG["search_days_back"]
+    full_start = (now_kst - timedelta(days=days)).strftime("%Y%m%d0000")
+    full_end = now_kst.strftime("%Y%m%d2359")
+
+    chunks = [
+        (
+            (now_kst - timedelta(days=min(offset + 2, days))).strftime("%Y%m%d0000"),
+            (now_kst - timedelta(days=offset)).strftime("%Y%m%d2359"),
+        )
+        for offset in range(0, days, 3)
+    ]
+
+    tasks = [(LIST_ENDPOINT, {"inqryBgnDt": s, "inqryEndDt": e}, 25) for s, e in chunks]
+    tasks.extend([
+        (SEARCH_ENDPOINT, {"inqryBgnDt": full_start, "inqryEndDt": full_end, "indstrytyNm": "상하수도설비공사업"}, 10),
+        (SEARCH_ENDPOINT, {"inqryBgnDt": full_start, "inqryEndDt": full_end, "indstrytyNm": "상ㆍ하수도설비공사업"}, 10),
+        (SEARCH_ENDPOINT, {"inqryBgnDt": full_start, "inqryEndDt": full_end, "bidNtceNm": "파주"}, 5),
+        (SEARCH_ENDPOINT, {"inqryBgnDt": full_start, "inqryEndDt": full_end, "ntceInsttNm": "파주"}, 5),
+    ])
+
+    raw_map = {}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        for fut in as_completed([pool.submit(fetch_all_pages, ep, prm, mp) for ep, prm, mp in tasks]):
+            for item in fut.result():
+                b_no = str(item.get("bidNtceNo", "")).strip()
+                b_ord = str(item.get("bidNtceOrd", "000")).strip()
+                if not b_no:
+                    continue
+                if b_no not in raw_map or b_ord >= str(raw_map[b_no].get("bidNtceOrd", "000")):
+                    raw_map[b_no] = item
+
+    # 1차 선별: 비수도권(광주지방조달청·전남·여수 등) 즉시 배제 + 파주/수도권/국방 잠재 공고 추출
+    preliminary = []
+    for b_no, item in raw_map.items():
+        title = str(item.get("bidNtceNm", "제목 없음"))
+        loc_text = " ".join(
+            str(item.get(k, "")) for k in ("bidNtceNm", "ntceInsttNm", "dminsttNm", "prtcptPsblRgnNm", "cnstrtsiteRgnNm")
+        )
+        field_text = " ".join(
+            str(item.get(k, "")) for k in ("indstrytyMfrcFldNm", "pubPrcrmntClsfcNm", "lcnsLmtNm")
+        ).strip()
+        norm_work = normalize_text(f"{title} {field_text}")
+
+        is_paju_local = any(kw in loc_text for kw in PAJU_KEYWORDS)
+        has_other_province = (not is_paju_local) and any(op in loc_text for op in OTHER_PROVINCE_KEYWORDS)
+        if has_other_province:
+            continue
+
+        has_water_signal = ("상하수도" in norm_work) or any(w in norm_work for w in WATER_KEYWORDS)
+        if is_paju_local or has_water_signal:
+            closed = is_closed(item.get("bidClseDt", ""), now_kst)
+            preliminary.append((b_no, item, closed, is_paju_local))
+
+    # 2차 상세 조회: 진행 중인 공고만 기초금액·A값·참가가능지역·업종제한 조회
+    open_prelim = [(b_no, it) for b_no, it, closed, _ in preliminary if not closed]
+    detail_map = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        fut_to_no = {
+            pool.submit(fetch_bid_details, b_no, str(it.get("bidNtceOrd") or "000").strip()): b_no
+            for b_no, it in open_prelim
+        }
+        for fut in as_completed(fut_to_no):
+            detail_map[fut_to_no[fut]] = fut.result()
+
+    # 3차 최종 판정
+    bids = []
+    for b_no, item, closed, is_paju_local in preliminary:
+        b_ord = str(item.get("bidNtceOrd") or "000").strip()
+        full_id = f"{b_no}-{b_ord}"
+        title = str(item.get("bidNtceNm", "제목 없음"))
+        agency = item.get("dminsttNm") or item.get("ntceInsttNm") or "발주처 미상"
+
+        basis, a_val, lic_region, lic_trade = detail_map.get(b_no, (0, 0, "", ""))
+        region = lic_region or str(item.get("prtcptPsblRgnNm") or "").strip() or "공고문 참조"
+        main_field = lic_trade or " ".join(
+            str(item.get(k, "")) for k in ("indstrytyMfrcFldNm", "pubPrcrmntClsfcNm", "lcnsLmtNm")
+        ).strip() or "공고문 확인"
+
+        loc_all = f"{title} {agency} {region} {item.get('cnstrtsiteRgnNm', '')}"
+        norm_work_all = normalize_text(f"{title} {main_field}")
+        norm_field = normalize_text(main_field)
+
+        # 비수도권 공고 최종 재검증
+        if not is_paju_local and any(op in loc_all for op in OTHER_PROVINCE_KEYWORDS):
+            continue
+
+        is_defense = b_no.startswith("M") or any(dk in f"{title} {agency}" for dk in DEFENSE_KEYWORDS)
+        has_gyeonggi_kw = is_paju_local or any(kw in loc_all for kw in GYEONGGI_KEYWORDS)
+        region_allowed = is_region_allowed_for_paju(region)
+
+        # 경기도 공고이거나, 국방조달 공고이면서 지역제한이 경기/전국/미표기인 경우 허용
+        is_target_area = has_gyeonggi_kw or (is_defense and region_allowed)
+
+        is_water = ("상하수도" in norm_work_all) or (
+            any(w in norm_work_all for w in WATER_KEYWORDS) and not any(ot in norm_field for ot in OTHER_TRADE_KEYWORDS)
+        )
+
+        if not is_paju_local and not (is_target_area and region_allowed and is_water):
+            continue
+
+        presmpt = parse_num(item.get("presmptPrce"))
+        is_est_base = basis <= 0
+        default_lower = 89.745 if presmpt < 1_000_000_000 else 88.745
+        lower_rate = parse_num(item.get("sucsfbidLwltRate"), as_float=True, default=default_lower) or default_lower
+
+        bids.append({
+            "id": full_id,
+            "bidNo": full_id,
+            "title": title,
+            "agency": agency,
+            "region": region,
+            "mainField": main_field,
+            "presmptPrice": presmpt,
+            "basePrice": round(presmpt * 1.1) if is_est_base else basis,
+            "aValue": a_val,
+            "isEstimatedBase": is_est_base,
+            "lowerRate": lower_rate,
+            "contractMethod": item.get("cntrctCnclsMthdNm") or "입찰방식 확인",
+            "deadline": item.get("bidClseDt", "마감일시 확인"),
+            "isClosed": closed,
+            "url": item.get("bidNtceDtlUrl") or "https://www.g2b.go.kr",
+            "isWater": is_water,
+            "isPajuLocal": is_paju_local,
+        })
+
+    bids.sort(key=lambda x: (not x["isClosed"], x["isWater"], x["isPajuLocal"], x["bidNo"]), reverse=True)
+    water_cnt = sum(1 for b in bids if b["isWater"])
+    open_water_cnt = sum(1 for b in bids if b["isWater"] and not b["isClosed"])
+
+    with open("paju_bids.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "updated_at": now_kst.strftime("%Y-%m-%d %H:%M"),
+            "company": COMPANY_CONFIG,
+            "total_scanned": len(raw_map),
+            "bids": bids,
+        }, f, ensure_ascii=False, indent=2)
+
+    print(
+        f"수집 완료 ({time.time() - t0:.1f}초): 전국 {len(raw_map)}건 -> "
+        f"파주·경기 대상 {len(bids)}건 (상하수도 {water_cnt}건 / 진행중 {open_water_cnt}건)"
+    )
+
+
+if __name__ == "__main__":
+    main()
