@@ -19,7 +19,7 @@ COMPANY_CONFIG = {
     "capacity_amount": 701_470_000,     # 시공능력평가액 (7억 147만 원)
     "perf_3yr_amount": 1_281_570_000,   # 최근 3년 상하수도 실적 (12억 8,157만 원)
     "credit_grade": "BBB",              # 신용등급 (A, BBB, BB0, BB-, B, CCC)
-    "search_days_back": 14,             # 조회 기간 (일)
+    "search_days_back": 14,             # 게시일 기준 조회 기간 (일)
 }
 
 SERVICE_KEY = unquote(os.environ.get("G2B_SERVICE_KEY", "").strip())
@@ -31,7 +31,7 @@ LICENSE_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoLicenseLimit02"
 REGION_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoPrtcptPsblRgn02"
 KST = timezone(timedelta(hours=9))
 
-# 파주 고유 지명 (타 지역 동명 지명인 진주 문산면·김천 금릉동 오탐 방지)
+# 파주 고유 지명 (타 지역 동명 지명 오탐 방지)
 PAJU_KEYWORDS = (
     "파주", "문산읍", "파주 문산", "운정", "금촌", "교하", "조리읍", "법원읍",
     "광탄면", "탄현면", "월롱면", "적성면", "파평면", "장단면",
@@ -46,7 +46,7 @@ GYEONGGI_KEYWORDS = (
     "동두천시", "과천시", "가평군", "연천군"
 )
 
-# 타 시·도 및 지방조달청 배제 키워드 (광주지방조달청·전남·여수 등 원천 차단)
+# 타 시·도 및 지방조달청 배제 키워드
 OTHER_PROVINCE_KEYWORDS = (
     "광주지방조달청", "광주광역시", "광주전남", "서울특별시", "인천광역시",
     "강원", "충청", "충북", "충남", "대전광역시", "세종",
@@ -54,12 +54,7 @@ OTHER_PROVINCE_KEYWORDS = (
     "경상", "경북", "경남", "대구광역시", "울산광역시", "부산광역시", "창원", "진주", "포항", "구미", "제주"
 )
 
-# 국방조달(D2B) 연계 공고 식별 키워드
-DEFENSE_KEYWORDS = (
-    "국방", "국군", "육군", "해군", "공군", "해병", "사령부", "여단", "단장", "대대", "부대", "국방시설"
-)
-
-# 상하수도설비공사업 관련 키워드 (준설, 비점오염, 심정, 관정, 지하수 등 보강)
+# 상하수도설비공사업 관련 키워드 (준설, 비점오염, 심정, 관정, 지하수 포함)
 WATER_KEYWORDS = (
     "상하수도", "상수도", "하수도", "상수관", "하수관", "관로", "급수", "배수", "오수", "우수관",
     "우수받이", "맨홀", "송수", "정수장", "누수", "가압장", "관거", "용수로",
@@ -81,7 +76,7 @@ A_VALUE_FIELDS = (
 
 def create_session() -> requests.Session:
     session = requests.Session()
-    retry = Retry(total=3, backoff_factor=0.8, status_forcelist=[429, 500, 502, 503, 504])
+    retry = Retry(total=3, backoff_factor=0.6, status_forcelist=[429, 500, 502, 503, 504])
     session.mount("https://", HTTPAdapter(max_retries=retry, pool_connections=12, pool_maxsize=12))
     return session
 
@@ -151,7 +146,7 @@ def fetch_page(endpoint: str, extra_params: dict, page_no: int, rows: int = 500)
     return extract_items(payload), total
 
 
-def fetch_all_pages(endpoint: str, extra_params: dict, max_pages: int = 25) -> list:
+def fetch_all_pages(endpoint: str, extra_params: dict, max_pages: int = 20) -> list:
     rows = 500
     try:
         items, total = fetch_page(endpoint, extra_params, 1, rows)
@@ -174,11 +169,11 @@ def fetch_all_pages(endpoint: str, extra_params: dict, max_pages: int = 25) -> l
 
 
 def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
-    """기초금액, A값 합계, 참가가능지역, 업종제한사항을 조회합니다."""
+    """개별 공고의 기초금액, A값 합계, 참가가능지역, 업종제한사항을 조회합니다."""
     base_params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
-        "inqryDiv": "2",
+        "inqryDiv": "2",  # 공고번호(bidNtceNo) 단건 조회용 구분코드
         "bidNtceNo": bid_no,
         "bidNtceOrd": bid_ord,
         "numOfRows": "10",
@@ -218,7 +213,6 @@ def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
 
 
 def is_region_allowed_for_paju(region_str: str) -> bool:
-    """파주시 소재 업체가 입찰 가능한 지역제한인지 판정"""
     r = str(region_str or "").strip()
     if not r or r in ("공고문 참조", "제한없음"):
         return True
@@ -253,15 +247,16 @@ def main():
     full_start = (now_kst - timedelta(days=days)).strftime("%Y%m%d0000")
     full_end = now_kst.strftime("%Y%m%d2359")
 
+    # 공고게시일시 기준(inqryDiv=1) 최근 14일을 4일 단위 4개 구간으로 경량 분할 조회
     chunks = [
         (
-            (now_kst - timedelta(days=min(offset + 2, days))).strftime("%Y%m%d0000"),
+            (now_kst - timedelta(days=min(offset + 3, days))).strftime("%Y%m%d0000"),
             (now_kst - timedelta(days=offset)).strftime("%Y%m%d2359"),
         )
-        for offset in range(0, days, 3)
+        for offset in range(0, days, 4)
     ]
 
-    tasks = [(LIST_ENDPOINT, {"inqryBgnDt": s, "inqryEndDt": e}, 25) for s, e in chunks]
+    tasks = [(LIST_ENDPOINT, {"inqryBgnDt": s, "inqryEndDt": e}, 20) for s, e in chunks]
     tasks.extend([
         (SEARCH_ENDPOINT, {"inqryBgnDt": full_start, "inqryEndDt": full_end, "indstrytyNm": "상하수도설비공사업"}, 10),
         (SEARCH_ENDPOINT, {"inqryBgnDt": full_start, "inqryEndDt": full_end, "indstrytyNm": "상ㆍ하수도설비공사업"}, 10),
@@ -280,7 +275,7 @@ def main():
                 if b_no not in raw_map or b_ord >= str(raw_map[b_no].get("bidNtceOrd", "000")):
                     raw_map[b_no] = item
 
-    # 1차 선별: 비수도권(광주지방조달청·전남·여수 등) 즉시 배제 + 파주/수도권/국방 잠재 공고 추출
+    # 1차 선별: 비수도권 배제 및 파주/상하수도 후보 추출
     preliminary = []
     for b_no, item in raw_map.items():
         title = str(item.get("bidNtceNm", "제목 없음"))
@@ -293,8 +288,7 @@ def main():
         norm_work = normalize_text(f"{title} {field_text}")
 
         is_paju_local = any(kw in loc_text for kw in PAJU_KEYWORDS)
-        has_other_province = (not is_paju_local) and any(op in loc_text for op in OTHER_PROVINCE_KEYWORDS)
-        if has_other_province:
+        if not is_paju_local and any(op in loc_text for op in OTHER_PROVINCE_KEYWORDS):
             continue
 
         has_water_signal = ("상하수도" in norm_work) or any(w in norm_work for w in WATER_KEYWORDS)
@@ -302,7 +296,7 @@ def main():
             closed = is_closed(item.get("bidClseDt", ""), now_kst)
             preliminary.append((b_no, item, closed, is_paju_local))
 
-    # 2차 상세 조회: 진행 중인 공고만 기초금액·A값·참가가능지역·업종제한 조회
+    # 2차 상세 조회: 진행 중인 후보 공고만 기초금액·A값·참가가능지역·업종제한 조회
     open_prelim = [(b_no, it) for b_no, it, closed, _ in preliminary if not closed]
     detail_map = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -331,22 +325,16 @@ def main():
         norm_work_all = normalize_text(f"{title} {main_field}")
         norm_field = normalize_text(main_field)
 
-        # 비수도권 공고 최종 재검증
         if not is_paju_local and any(op in loc_all for op in OTHER_PROVINCE_KEYWORDS):
             continue
 
-        is_defense = b_no.startswith("M") or any(dk in f"{title} {agency}" for dk in DEFENSE_KEYWORDS)
-        has_gyeonggi_kw = is_paju_local or any(kw in loc_all for kw in GYEONGGI_KEYWORDS)
+        is_gyeonggi_ok = is_paju_local or any(kw in loc_all for kw in GYEONGGI_KEYWORDS)
         region_allowed = is_region_allowed_for_paju(region)
-
-        # 경기도 공고이거나, 국방조달 공고이면서 지역제한이 경기/전국/미표기인 경우 허용
-        is_target_area = has_gyeonggi_kw or (is_defense and region_allowed)
-
         is_water = ("상하수도" in norm_work_all) or (
             any(w in norm_work_all for w in WATER_KEYWORDS) and not any(ot in norm_field for ot in OTHER_TRADE_KEYWORDS)
         )
 
-        if not is_paju_local and not (is_target_area and region_allowed and is_water):
+        if not is_paju_local and not (is_gyeonggi_ok and region_allowed and is_water):
             continue
 
         presmpt = parse_num(item.get("presmptPrce"))
