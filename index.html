@@ -13,32 +13,79 @@
       height: 20px; width: 20px; border-radius: 50%;
       background: #2563eb; cursor: pointer; box-shadow: 0 2px 6px rgba(37,99,235,0.4);
     }
+    @keyframes spinOnce { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .spin-anim { animation: spinOnce 0.7s linear infinite; }
   </style>
 </head>
 <body class="text-slate-800">
 
   <header class="bg-slate-900 text-white shadow-md">
-    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
       <div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <span id="statusBadge" class="bg-emerald-500 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded">LIVE 연동</span>
           <h1 class="text-lg md:text-xl font-bold tracking-tight">파주·경기 상하수도 스마트 입찰 지원 시스템</h1>
         </div>
-        <p id="lastUpdatedText" class="text-xs text-slate-400 mt-1">나라장터(G2B) 데이터 불러오는 중...</p>
+        <div class="flex flex-wrap items-center gap-2 mt-1.5">
+          <p id="lastUpdatedText" class="text-xs text-slate-400">나라장터(G2B) 데이터 불러오는 중...</p>
+          <span id="refreshStatusMsg" class="text-xs font-semibold text-emerald-400"></span>
+        </div>
       </div>
 
-      <div class="bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <div><span class="text-slate-400">업체명:</span> <strong id="companyName" class="text-white">드림건설</strong></div>
-        <div><span class="text-slate-400">시공능력:</span> <strong id="companyCap" class="text-emerald-400">18억 5,000만 원</strong></div>
-        <div><span class="text-slate-400">3년실적:</span> <strong id="companyPerf" class="text-blue-300">14억 2,000만 원</strong></div>
-        <div><span class="text-slate-400">신용등급:</span> <strong id="companyCredit" class="text-amber-300">BBB</strong></div>
-        <button type="button" onclick="$('specPanel').classList.toggle('hidden')"
-          class="ml-auto bg-blue-600 hover:bg-blue-500 text-white font-bold px-2.5 py-1 rounded-lg transition">
-          ⚙️ 회사 스펙 입력
-        </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- 새로고침 컨트롤 -->
+        <div class="flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-xl p-1.5">
+          <button type="button" onclick="refreshDashboardData(true)" id="btnQuickRefresh"
+            class="inline-flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+            <span id="iconQuickRefresh">🔄</span> 화면 새로고침
+          </button>
+          <button type="button" onclick="triggerRemoteCrawl()" id="btnRemoteCrawl"
+            class="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">
+            <span>⚡</span> 나라장터 재수집
+          </button>
+          <button type="button" onclick="$('ghTokenPanel').classList.toggle('hidden')" title="GitHub 실시간 수집 연동 설정"
+            class="text-xs text-slate-300 hover:text-white px-2 py-1.5 rounded-lg hover:bg-slate-700 transition">
+            🔑
+          </button>
+        </div>
+
+        <!-- 회사 스펙 요약 -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2 text-xs flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div><span class="text-slate-400">업체:</span> <strong id="companyName" class="text-white">(주)드림건설</strong></div>
+          <div><span class="text-slate-400">시공능력:</span> <strong id="companyCap" class="text-emerald-400">7억 147만 원</strong></div>
+          <div><span class="text-slate-400">3년실적:</span> <strong id="companyPerf" class="text-blue-300">12억 8,157만 원</strong></div>
+          <div><span class="text-slate-400">신용:</span> <strong id="companyCredit" class="text-amber-300">BBB</strong></div>
+          <button type="button" onclick="$('specPanel').classList.toggle('hidden')"
+            class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-2.5 py-1 rounded-lg transition">
+            ⚙️ 스펙
+          </button>
+        </div>
       </div>
     </div>
 
+    <!-- GitHub Actions 실시간 재수집 연동 설정 패널 -->
+    <div id="ghTokenPanel" class="hidden bg-slate-800 border-t border-slate-700">
+      <div class="max-w-7xl mx-auto px-4 py-3.5 text-xs">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div class="font-bold text-emerald-300">⚡ 나라장터 즉시 재수집(GitHub Actions 원격 실행) 연동</div>
+            <p class="text-slate-400 mt-0.5">GitHub Personal Access Token(Actions: Read &amp; Write 권한)을 브라우저에 저장하면 버튼 클릭 즉시 수집기가 실행됩니다.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <input type="text" id="ghRepoInput" placeholder="예: username/repo-name"
+              class="bg-slate-900 border border-slate-600 rounded-lg px-2.5 py-1.5 text-white w-48 font-mono" />
+            <input type="password" id="ghTokenInput" placeholder="github_pat_... 토큰 입력"
+              class="bg-slate-900 border border-slate-600 rounded-lg px-2.5 py-1.5 text-white w-56 font-mono" />
+            <button type="button" onclick="saveGithubConfig()"
+              class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold px-3 py-1.5 rounded-lg">
+              연동 저장
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 회사 스펙 입력 패널 -->
     <div id="specPanel" class="hidden bg-slate-800 border-t border-slate-700">
       <div class="max-w-7xl mx-auto px-4 py-4">
         <div class="flex items-center justify-between mb-3">
@@ -50,17 +97,17 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
           <div>
             <label class="block text-slate-300 mb-1">업체명</label>
-            <input type="text" id="inputCompName" value="드림건설"
+            <input type="text" id="inputCompName" value="(주)드림건설"
               class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white font-semibold" />
           </div>
           <div>
             <label class="block text-slate-300 mb-1">시공능력평가액 (원)</label>
-            <input type="text" id="inputCompCap" value="1,850,000,000"
+            <input type="text" id="inputCompCap" value="701,470,000"
               class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-emerald-300 font-bold text-right" />
           </div>
           <div>
             <label class="block text-slate-300 mb-1">최근 3년 상하수도 실적 (원)</label>
-            <input type="text" id="inputCompPerf" value="1,420,000,000"
+            <input type="text" id="inputCompPerf" value="1,281,570,000"
               class="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-blue-300 font-bold text-right" />
           </div>
           <div>
@@ -87,7 +134,7 @@
   </header>
 
   <div id="fallbackBanner" class="hidden bg-amber-100 border-b border-amber-300 text-amber-950 text-xs py-2.5 px-4 text-center font-medium">
-    현재는 <strong>시연용 샘플 공고</strong>가 표시되고 있습니다. GitHub Actions에서 <code>파주 상하수도 공고 자동 수집</code>을 실행하면 실제 나라장터 공고로 전환됩니다.
+    현재는 <strong>시연용 샘플 공고</strong>가 표시되고 있습니다. GitHub Actions에서 <code>파주 상하수도 공고 자동 수집</code>을 실행하거나 상단 <strong>⚡ 나라장터 재수집</strong>을 눌러주세요.
   </div>
 
   <main class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -133,12 +180,13 @@
           </div>
         </div>
 
-        <div id="bidList" class="space-y-2.5 max-h-[650px] overflow-y-auto pr-1"></div>
+        <div id="bidList" class="space-y-2.5 max-h-[760px] overflow-y-auto pr-1"></div>
       </div>
     </section>
 
-    <!-- 우측: 적격심사 상세 & 투찰가 계산기 -->
+    <!-- 우측: 적격심사 상세 & 투찰가 계산기 & AI 과거데이터 학습기 -->
     <section class="lg:col-span-7 space-y-5">
+      <!-- 공고 상세 및 적격심사 -->
       <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3 mb-4">
           <div class="flex-1 min-w-[220px]">
@@ -182,6 +230,122 @@
         <div class="bg-blue-50/70 border border-blue-100 rounded-lg p-3 text-xs text-slate-700 space-y-1">
           <div class="font-bold text-blue-900">📌 공고 및 심사 핵심 요약</div>
           <p id="detailSummary" class="whitespace-pre-line leading-relaxed">-</p>
+        </div>
+      </div>
+
+      <!-- 과거 입찰 데이터 학습 & AI 최적 투찰금액 추출 패널 -->
+      <div class="bg-white rounded-xl shadow-sm border-2 border-indigo-200 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="bg-indigo-600 text-white text-[11px] font-extrabold px-2 py-0.5 rounded">AI 통계학습</span>
+              <h3 class="font-bold text-base text-slate-900">🧠 과거 입찰 데이터 학습 &amp; 최적 투찰금액 추출</h3>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">
+              과거 개찰결과(사정률 분포 · 발주처 패턴 · 규모 가중치)를 학습해 현재 공고의 최적 투찰금액을 도출합니다.
+            </p>
+          </div>
+          <button type="button" onclick="$('historyImportPanel').classList.toggle('hidden')"
+            class="bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-bold px-3 py-1.5 rounded-lg transition">
+            📥 과거 데이터 입력·관리 (<span id="histCountBadge">0</span>건)
+          </button>
+        </div>
+
+        <!-- 과거 데이터 입력/업로드/붙여넣기 서랍 -->
+        <div id="historyImportPanel" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4 text-xs space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="font-bold text-slate-800">📂 과거 개찰 데이터 추가 (엑셀·입찰사이트·나라장터 복사 붙여넣기 지원)</span>
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" onclick="loadSampleHistoricalData()" class="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold px-2.5 py-1 rounded">
+                경기 상하수도 샘플 10건 추가
+              </button>
+              <button type="button" onclick="exportHistoricalJson()" class="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold px-2.5 py-1 rounded">
+                JSON 백업 저장
+              </button>
+              <button type="button" onclick="clearCustomHistory()" class="text-rose-600 hover:underline px-2 py-1">
+                사용자 데이터 초기화
+              </button>
+            </div>
+          </div>
+
+          <p class="text-[11px] text-slate-500 leading-relaxed">
+            엑셀이나 타 입찰사이트 개찰결과 표를 드래그해 아래 칸에 그대로 붙여넣으세요. 행마다 <strong>사정률(예: 100.145)</strong>이 있거나 <strong>기초금액과 예정가격</strong>이 함께 있으면 자동으로 사정률을 역산해 학습합니다.
+          </p>
+
+          <textarea id="bulkHistoryInput" rows="4"
+            placeholder="예시 1) 경기도 파주시 | 문산읍 하수관로 정비 | 기초 245,000,000 | 예정 245,380,000&#10;예시 2) 경기도 수원시 | 노후 상수관 교체 | 100.182%&#10;예시 3) 엑셀에서 [발주처, 공고명, 기초금액, 예정가격] 열을 복사해 그대로 붙여넣기"
+            class="w-full border border-slate-300 rounded-lg p-2.5 font-mono text-xs bg-white focus:outline-none focus:border-indigo-500"></textarea>
+
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <label class="inline-flex items-center gap-1.5 bg-white border border-slate-300 hover:bg-slate-100 px-3 py-1.5 rounded-lg cursor-pointer font-semibold text-slate-700">
+              <span>📄 CSV / TXT 파일 불러오기</span>
+              <input type="file" id="histFileInput" accept=".csv,.txt,.tsv,.json" class="hidden" onchange="handleHistoryFileUpload(event)" />
+            </label>
+            <button type="button" onclick="ingestBulkHistory()"
+              class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-1.5 rounded-lg transition">
+              데이터 파싱 및 즉시 재학습 실행 ✓
+            </button>
+          </div>
+        </div>
+
+        <!-- 학습된 사정률 분포 SVG 차트 -->
+        <div class="bg-slate-900 rounded-xl p-3.5 mb-4 text-white">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] mb-2">
+            <span class="font-bold text-indigo-300">📈 발주처·규모 가중 사정률 확률밀도(KDE) 학습 분포</span>
+            <span id="kdeStatsLabel" class="text-slate-400">학습 표본 분석 중...</span>
+          </div>
+          <div id="kdeChartContainer" class="w-full h-28"></div>
+        </div>
+
+        <!-- 3가지 AI 추출 최적 전략 카드 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <!-- 전략 1: 최빈 확률 추천 (메인 추천) -->
+          <div class="bg-indigo-50 border-2 border-indigo-500 rounded-xl p-3.5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[11px] font-extrabold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">🎯 최빈 확률 추천</span>
+                <span id="aiModeRate" class="text-xs font-extrabold text-indigo-900">100.125%</span>
+              </div>
+              <div id="aiModePrice" class="text-lg font-extrabold text-slate-900 mt-1">0 원</div>
+              <p id="aiModeDesc" class="text-[11px] text-slate-600 mt-1 leading-snug">유사 발주처 밀도 최고점 구간</p>
+            </div>
+            <button type="button" onclick="applyAiRecommendation('mode')"
+              class="mt-3 w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 rounded-lg transition">
+              이 금액 계산기에 적용
+            </button>
+          </div>
+
+          <!-- 전략 2: 미달 방지 안정형 -->
+          <div class="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[11px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">🛡️ 미달 방지 안정형</span>
+                <span id="aiSafeRate" class="text-xs font-extrabold text-emerald-900">100.220%</span>
+              </div>
+              <div id="aiSafePrice" class="text-lg font-extrabold text-slate-900 mt-1">0 원</div>
+              <p class="text-[11px] text-slate-600 mt-1 leading-snug">예가 상향 시 하한율 미달 탈락 방지</p>
+            </div>
+            <button type="button" onclick="applyAiRecommendation('safe')"
+              class="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg transition">
+              이 금액 계산기에 적용
+            </button>
+          </div>
+
+          <!-- 전략 3: 공격적 승부형 -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-[11px] font-extrabold text-slate-700 bg-slate-200 px-2 py-0.5 rounded">⚡ 공격적 승부형</span>
+                <span id="aiAggRate" class="text-xs font-extrabold text-slate-900">100.040%</span>
+              </div>
+              <div id="aiAggPrice" class="text-lg font-extrabold text-slate-900 mt-1">0 원</div>
+              <p class="text-[11px] text-slate-600 mt-1 leading-snug">저가 구간 낙찰 1순위 집중 노림수</p>
+            </div>
+            <button type="button" onclick="applyAiRecommendation('agg')"
+              class="mt-3 w-full bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2 rounded-lg transition">
+              이 금액 계산기에 적용
+            </button>
+          </div>
         </div>
       </div>
 
@@ -238,13 +402,13 @@
 
           <div class="flex flex-wrap gap-2">
             <button type="button" onclick="setRate(99.850)" class="text-xs bg-white hover:bg-slate-100 border border-slate-300 rounded-md px-2.5 py-1 font-medium">
-              보수적 (99.850%)
+              저가형 (99.850%)
             </button>
             <button type="button" onclick="setRate(100.000)" class="text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-md px-2.5 py-1 font-semibold">
               기준점 (100.000%)
             </button>
-            <button type="button" onclick="setRate(100.250)" class="text-xs bg-white hover:bg-slate-100 border border-slate-300 rounded-md px-2.5 py-1 font-medium">
-              상향 투찰 (100.250%)
+            <button type="button" onclick="setRate(aiRecommendations.mode.rate)" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-md px-2.5 py-1 font-semibold">
+              🧠 AI 추천 (<span id="btnAiRateLabel">100.125</span>%)
             </button>
           </div>
         </div>
@@ -295,18 +459,40 @@
   <script>
     const $ = id => document.getElementById(id);
     const STORAGE_KEY = "dream_bid_company_specs_v1";
+    const HIST_STORAGE_KEY = "dream_bid_history_v1";
+    const GH_STORAGE_KEY = "dream_bid_gh_cfg_v1";
     const CREDIT_RATIO = { A: 1.0, BBB: 1.0, BB0: 1.0, "BB-": 0.98, B: 0.95, CCC: 0.90 };
 
-    let defaultCompany = { name: "드림건설", capacity_amount: 1850000000, perf_3yr_amount: 1420000000, credit_grade: "BBB" };
+    let defaultCompany = { name: "(주)드림건설", capacity_amount: 701470000, perf_3yr_amount: 1281570000, credit_grade: "BBB" };
     let currentCompany = { ...defaultCompany };
     let allBids = [];
     let selectedBid = null;
     let lastDrawnRate = 100.000;
+    let serverHistory = [];
+    let customHistory = [];
+    let aiRecommendations = {
+      mode: { rate: 100.125, price: 0 },
+      safe: { rate: 100.220, price: 0 },
+      agg: { rate: 100.040, price: 0 }
+    };
+
+    const priorHistorySamples = [
+      { agency: "경기도 파주시", title: "문산읍 노후 상수관로 교체공사", basePrice: 248500000, rate: 100.142, source: "기본통계" },
+      { agency: "경기도 파주시", title: "금촌동 우수관로 준설 및 정비", basePrice: 142000000, rate: 100.085, source: "기본통계" },
+      { agency: "경기도 파주시", title: "운정지구 배수관로 누수복구", basePrice: 315000000, rate: 99.965, source: "기본통계" },
+      { agency: "경기도 수원시", title: "권선구 하수관로 정비공사", basePrice: 382000000, rate: 100.188, source: "기본통계" },
+      { agency: "경기도 고양시", title: "일산동구 오수관로 개량공사", basePrice: 465000000, rate: 100.215, source: "기본통계" },
+      { agency: "경기도 남양주시", title: "화도읍 상수관로 이설공사", basePrice: 229000000, rate: 100.032, source: "기본통계" },
+      { agency: "경기도 시흥시", title: "정왕동 노후관로 교체공사", basePrice: 358000000, rate: 99.918, source: "기본통계" },
+      { agency: "경기도 하남시", title: "비점오염저감시설 준설공사", basePrice: 68500000, rate: 100.264, source: "기본통계" },
+      { agency: "경기도교육청", title: "학교 오수처리시설 배관개선", basePrice: 118000000, rate: 100.110, source: "기본통계" },
+      { agency: "경기도 양주시", title: "백석읍 급수관로 확장공사", basePrice: 274000000, rate: 99.884, source: "기본통계" }
+    ];
 
     const fallbackBids = [{
       id: "R26BK01823121-000", bidNo: "R26BK01823121-000",
       title: "[샘플] 중로2-291호선 노후 하수관로 교체공사",
-      agency: "경기도 수원시 권선구", region: "경기도", mainField: "상하수도설비공사",
+      agency: "경기도 수원시 권선구", region: "경기도", mainField: "상ㆍ하수도설비공사업(4996)",
       presmptPrice: 352454546, basePrice: 387700000, aValue: 31611896, isEstimatedBase: false,
       lowerRate: 89.745, contractMethod: "제한경쟁", deadline: "2026-11-19 10:00",
       isClosed: false, url: "https://www.g2b.go.kr", isWater: true, isPajuLocal: false
@@ -334,12 +520,423 @@
       return eok ? `${sign}${eok}억 원` : `${sign}${man.toLocaleString()}만 원`;
     }
 
+    function computeBidAmount(base, aVal, lowerRate, assessRate) {
+      const expected = Math.round(base * (assessRate / 100));
+      return aVal > 0
+        ? Math.ceil((expected - aVal) * (lowerRate / 100) + aVal)
+        : Math.ceil(expected * (lowerRate / 100));
+    }
+
+    // =========================================================================
+    // [기능 1] 실시간 새로고침 & GitHub Actions 원격 재수집 트리거
+    // =========================================================================
+    function showRefreshMsg(text, isError = false) {
+      const el = $('refreshStatusMsg');
+      el.textContent = text;
+      el.className = `text-xs font-bold ${isError ? 'text-rose-400' : 'text-emerald-400'}`;
+      if (!isError) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 5000);
+    }
+
+    async function refreshDashboardData(manual = false) {
+      const icon = $('iconQuickRefresh');
+      if (icon) icon.classList.add('spin-anim');
+      try {
+        const ts = Date.now();
+        const [bidRes, histRes] = await Promise.all([
+          fetch(`./paju_bids.json?t=${ts}`, { cache: 'no-store' }),
+          fetch(`./historical_bids.json?t=${ts}`, { cache: 'no-store' }).catch(() => null)
+        ]);
+
+        if (!bidRes.ok) throw new Error();
+        const data = await bidRes.json();
+        allBids = Array.isArray(data.bids) ? data.bids : [];
+        $('statusBadge').textContent = 'LIVE 연동';
+        $('statusBadge').className = 'bg-emerald-500 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded';
+        $('fallbackBanner').classList.add('hidden');
+        $('lastUpdatedText').textContent = `최근 자동 수집: ${data.updated_at || '방금 전'} (전국 ${data.total_scanned || 0}건 스캔 완료)`;
+
+        if (data.company) {
+          defaultCompany = { ...defaultCompany, ...data.company, credit_grade: normalizeCreditGrade(data.company.credit_grade) };
+          if (!localStorage.getItem(STORAGE_KEY)) {
+            currentCompany = { ...defaultCompany };
+            updateCompanyHeaderUI();
+          }
+        }
+
+        if (histRes && histRes.ok) {
+          const hData = await histRes.json();
+          serverHistory = Array.isArray(hData.records) ? hData.records : [];
+        }
+
+        recalculateAllBids();
+        if (manual) showRefreshMsg(`✓ 최신 데이터 갱신 완료 (${new Date().toLocaleTimeString('ko-KR')})`);
+      } catch {
+        if (!allBids.length) {
+          allBids = fallbackBids;
+          $('statusBadge').textContent = '샘플 모드';
+          $('statusBadge').className = 'bg-amber-400 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded';
+          $('lastUpdatedText').textContent = 'paju_bids.json 대기 중 (GitHub Actions 실행 필요)';
+          $('fallbackBanner').classList.remove('hidden');
+          recalculateAllBids();
+        }
+        if (manual) showRefreshMsg('아직 수집 파일이 생성되지 않았습니다.', true);
+      } finally {
+        if (icon) icon.classList.remove('spin-anim');
+      }
+    }
+
+    function detectGithubRepo() {
+      const host = window.location.hostname;
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      if (host.endsWith('.github.io') && pathParts.length >= 1) {
+        return `${host.replace('.github.io', '')}/${pathParts[0]}`;
+      }
+      return '';
+    }
+
+    function saveGithubConfig() {
+      const repo = $('ghRepoInput').value.trim();
+      const token = $('ghTokenInput').value.trim();
+      if (!repo || !token) return alert('저장소(username/repo)와 GitHub 토큰을 모두 입력해 주세요.');
+      localStorage.setItem(GH_STORAGE_KEY, JSON.stringify({ repo, token }));
+      $('ghTokenPanel').classList.add('hidden');
+      showRefreshMsg('✓ GitHub 실시간 수집 연동이 저장되었습니다.');
+    }
+
+    async function triggerRemoteCrawl() {
+      let cfg = {};
+      try { cfg = JSON.parse(localStorage.getItem(GH_STORAGE_KEY)) || {}; } catch {}
+      if (!cfg.token || !cfg.repo) {
+        $('ghTokenPanel').classList.remove('hidden');
+        if (!$('ghRepoInput').value) $('ghRepoInput').value = detectGithubRepo();
+        showRefreshMsg('먼저 우측 열쇠(🔑) 칸에 GitHub 토큰을 입력해 주세요.', true);
+        return;
+      }
+
+      const btn = $('btnRemoteCrawl');
+      btn.disabled = true;
+      btn.classList.add('opacity-60');
+      showRefreshMsg('⏳ 나라장터 수집기 실행 요청 중...');
+
+      try {
+        const headers = {
+          'Authorization': `Bearer ${cfg.token}`,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        };
+        const wfRes = await fetch(`https://api.github.com/repos/${cfg.repo}/actions/workflows`, { headers });
+        if (!wfRes.ok) throw new Error('저장소 또는 토큰 권한을 확인해 주세요.');
+        const wfData = await wfRes.json();
+        const userWorkflows = (wfData.workflows || []).filter(
+          w => w.state === 'active' && !String(w.path || '').includes('pages-build-deployment')
+        );
+        const wf = userWorkflows[0];
+        if (!wf) throw new Error('실행 가능한 수집 워크플로우(.yml)를 찾지 못했습니다.');
+
+        const prevTime = $('lastUpdatedText').textContent;
+        const dispRes = await fetch(`https://api.github.com/repos/${cfg.repo}/actions/workflows/${wf.id}/dispatches`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ref: 'main' })
+        });
+        if (!dispRes.ok) throw new Error('워크플로우 실행 요청 실패 (workflow_dispatch 권한 확인 필요)');
+
+        showRefreshMsg('🔄 나라장터 실시간 스캔 중... (약 15~25초 소요)');
+        let attempts = 0;
+        const pollTimer = setInterval(async () => {
+          attempts++;
+          await refreshDashboardData(false);
+          if ($('lastUpdatedText').textContent !== prevTime || attempts >= 10) {
+            clearInterval(pollTimer);
+            btn.disabled = false;
+            btn.classList.remove('opacity-60');
+            showRefreshMsg($('lastUpdatedText').textContent !== prevTime
+              ? '🎉 나라장터 최신 공고 재수집 및 반영 완료!'
+              : '수집 작업이 백그라운드에서 진행 중입니다. 잠시 후 화면 새로고침을 눌러주세요.');
+          }
+        }, 4000);
+      } catch (err) {
+        btn.disabled = false;
+        btn.classList.remove('opacity-60');
+        showRefreshMsg(`⚠️ ${err.message}`, true);
+      }
+    }
+
+    // =========================================================================
+    // [기능 2] 과거 입찰 데이터 학습 (Weighted Gaussian KDE) & 최적 금액 추출
+    // =========================================================================
+    function getAllHistoricalRecords() {
+      return [...priorHistorySamples, ...serverHistory, ...customHistory];
+    }
+
+    function appendUniqueCustomHistory(newRecords) {
+      const existingKeys = new Set(customHistory.map(r => `${r.agency}|${r.basePrice}|${r.rate.toFixed(4)}`));
+      let addedCount = 0;
+      for (const rec of newRecords) {
+        const key = `${rec.agency}|${rec.basePrice}|${rec.rate.toFixed(4)}`;
+        if (!existingKeys.has(key)) {
+          existingKeys.add(key);
+          customHistory.push(rec);
+          addedCount++;
+        }
+      }
+      localStorage.setItem(HIST_STORAGE_KEY, JSON.stringify(customHistory));
+      return addedCount;
+    }
+
+    function parseHistoricalBulkText(rawText) {
+      const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const parsed = [];
+      const agencyRegex = /(파주시|수원시|고양시|남양주시|시흥시|하남시|용인시|화성시|성남시|김포시|양주시|포천시|의정부시|경기도교육청|파주교육지원청|파주도시공사|국군[가-힣]+|경기도)/;
+
+      for (const line of lines) {
+        const cells = line.split(/[\t|,]+/).map(c => c.trim()).filter(Boolean);
+        const fullLine = cells.join(' ');
+        const agencyMatch = fullLine.match(agencyRegex);
+        const agency = agencyMatch ? agencyMatch[1] : (cells[0] && cells[0].length <= 15 ? cells[0] : '경기도 지자체');
+
+        let rate = 0;
+        const rateMatches = fullLine.match(/\b(9[6-9]\.\d{1,4}|10[0-3]\.\d{1,4})\b/g);
+        if (rateMatches) rate = parseFloat(rateMatches[0]);
+
+        const moneyNums = (fullLine.match(/\b\d{1,3}(?:,\d{3}){2,}\b|\b\d{7,11}\b/g) || [])
+          .map(s => Number(s.replace(/,/g, '')))
+          .filter(n => n >= 10000000);
+
+        let basePrice = moneyNums[0] || 0;
+        if (!rate && moneyNums.length >= 2) {
+          for (let i = 0; i < moneyNums.length; i++) {
+            for (let j = 0; j < moneyNums.length; j++) {
+              if (i === j) continue;
+              const ratio = (moneyNums[j] / moneyNums[i]) * 100;
+              if (ratio >= 96.5 && ratio <= 103.5) {
+                basePrice = moneyNums[i];
+                rate = Number(ratio.toFixed(4));
+                break;
+              }
+            }
+            if (rate) break;
+          }
+        }
+
+        if (rate >= 96.5 && rate <= 103.5) {
+          parsed.push({ agency, title: fullLine.slice(0, 45), basePrice, rate, source: '사용자학습' });
+        }
+      }
+      return parsed;
+    }
+
+    function ingestBulkHistory() {
+      const raw = $('bulkHistoryInput').value.trim();
+      if (!raw) return alert('붙여넣기 칸에 과거 개찰 데이터를 입력해 주세요.');
+      const parsed = parseHistoricalBulkText(raw);
+      if (!parsed.length) {
+        return alert('유효한 사정률(96.5~103.5%) 또는 기초금액·예정가격 쌍을 찾지 못했습니다.');
+      }
+      const added = appendUniqueCustomHistory(parsed);
+      $('bulkHistoryInput').value = '';
+      $('historyImportPanel').classList.add('hidden');
+      trainAndPredictOptimalBid();
+      showRefreshMsg(`🧠 신규 개찰 데이터 ${added}건 학습 완료! 최적 투찰가가 재산출되었습니다.`);
+    }
+
+    function handleHistoryFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const text = String(e.target.result || '');
+        if (file.name.endsWith('.json')) {
+          try {
+            const arr = JSON.parse(text);
+            const list = Array.isArray(arr) ? arr : (arr.records || []);
+            const valid = list.filter(r => r.rate >= 96.5 && r.rate <= 103.5);
+            const added = appendUniqueCustomHistory(valid);
+            trainAndPredictOptimalBid();
+            showRefreshMsg(`🧠 JSON 파일에서 신규 ${added}건 학습 완료!`);
+            return;
+          } catch {}
+        }
+        $('bulkHistoryInput').value = text;
+        ingestBulkHistory();
+      };
+      reader.readAsText(file, 'utf-8');
+      event.target.value = '';
+    }
+
+    function loadSampleHistoricalData() {
+      const extraSamples = [
+        { agency: "경기도 파주시", title: "조리읍 하수관거 정비공사", basePrice: 195000000, rate: 100.165, source: "샘플실적" },
+        { agency: "경기도 파주시", title: "법원읍 노후관 교체공사", basePrice: 288000000, rate: 100.118, source: "샘플실적" },
+        { agency: "경기도 파주시", title: "탄현면 배수관로 신설공사", basePrice: 164000000, rate: 100.204, source: "샘플실적" },
+        { agency: "경기도 수원시", title: "장안구 노후 상수관 개량", basePrice: 391000000, rate: 100.155, source: "샘플실적" },
+        { agency: "경기도 수원시", title: "영통구 하수관로 준설공사", basePrice: 112000000, rate: 100.230, source: "샘플실적" },
+        { agency: "경기도 고양시", title: "덕양구 우수관로 정비공사", basePrice: 642000000, rate: 100.192, source: "샘플실적" },
+        { agency: "경기도 남양주시", title: "진접읍 오수관로 이설공사", basePrice: 241000000, rate: 100.074, source: "샘플실적" },
+        { agency: "경기도 시흥시", title: "은행동 상수관로 교체공사", basePrice: 369000000, rate: 99.952, source: "샘플실적" },
+        { agency: "경기도 하남시", title: "덕풍동 비점오염시설 정비", basePrice: 54800000, rate: 100.281, source: "샘플실적" },
+        { agency: "경기도교육청", title: "파주 관내 초등학교 배관보수", basePrice: 98500000, rate: 100.136, source: "샘플실적" }
+      ];
+      const added = appendUniqueCustomHistory(extraSamples);
+      trainAndPredictOptimalBid();
+      showRefreshMsg(added > 0 ? `🧠 경기·파주 개찰 표본 ${added}건이 추가 학습되었습니다.` : '이미 샘플 데이터가 학습되어 있습니다.');
+    }
+
+    function clearCustomHistory() {
+      customHistory = [];
+      localStorage.removeItem(HIST_STORAGE_KEY);
+      trainAndPredictOptimalBid();
+    }
+
+    function exportHistoricalJson() {
+      const blob = new Blob([JSON.stringify({ records: getAllHistoricalRecords() }, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'historical_bids.json';
+      a.click();
+    }
+
+    function trainAndPredictOptimalBid() {
+      const records = getAllHistoricalRecords();
+      $('histCountBadge').textContent = records.length;
+
+      const targetAgency = selectedBid ? selectedBid.agency : '';
+      const targetBase = parseNum($('basePriceInput').value) || (selectedBid ? selectedBid.basePrice : 0);
+      const targetAVal = parseNum($('aValueInput').value);
+      const targetLower = parseFloat($('lowerRateInput').value) || (selectedBid ? selectedBid.qual.minPassBidRate : 89.745);
+
+      const cleanTarget = targetAgency.replace('경기도 ', '').split(' ')[0];
+      const isEduTarget = targetAgency.includes('교육청');
+
+      const weightedPoints = records.map(rec => {
+        let w = rec.source === '기본통계' ? 0.6 : 1.5;
+        if (cleanTarget && rec.agency) {
+          if (rec.agency.includes(cleanTarget)) w *= 2.8;
+          else if (isEduTarget && rec.agency.includes('교육청')) w *= 2.5;
+        }
+        if (targetBase > 0 && rec.basePrice > 0) {
+          const ratio = Math.min(targetBase, rec.basePrice) / Math.max(targetBase, rec.basePrice);
+          w *= (0.7 + 0.8 * ratio);
+        }
+        return { rate: rec.rate, weight: w };
+      });
+
+      const totalW = weightedPoints.reduce((s, p) => s + p.weight, 0) || 1;
+      const weightedMean = weightedPoints.reduce((s, p) => s + p.rate * p.weight, 0) / totalW;
+      const weightedVar = weightedPoints.reduce((s, p) => s + p.weight * Math.pow(p.rate - weightedMean, 2), 0) / totalW;
+      const stdDev = Math.max(Math.sqrt(weightedVar), 0.12);
+      const bandwidth = Math.max(0.10, 1.06 * stdDev * Math.pow(records.length, -0.2));
+
+      const grid = [];
+      let maxDensity = 0;
+      let modeRate = weightedMean;
+
+      for (let r = 98.500; r <= 101.500; r += 0.005) {
+        const rate = Number(r.toFixed(3));
+        let density = 0;
+        for (const pt of weightedPoints) {
+          const z = (rate - pt.rate) / bandwidth;
+          density += pt.weight * Math.exp(-0.5 * z * z);
+        }
+        density /= (totalW * bandwidth * Math.sqrt(2 * Math.PI));
+        grid.push({ rate, density });
+
+        if (density > maxDensity) {
+          maxDensity = density;
+          modeRate = rate;
+        }
+      }
+
+      // 나라장터 낙찰하한선 수리 구조 반영:
+      // 1) 최빈 확률 추천 (Mode): 밀도 최고점
+      // 2) 미달 방지 안정형 (Safe-High): 실제 예가가 평균보다 높게 뽑혀도 하한선 미달 탈락을 피하는 상향 안전마진 (+0.60σ)
+      // 3) 공격적 승부형 (Aggressive): 저가 구간 1순위를 노리는 하향 승부 타점 (-0.45σ)
+      const finalMode = Number(modeRate.toFixed(3));
+      const finalSafe = Number(Math.min(101.500, finalMode + stdDev * 0.60).toFixed(3));
+      const finalAgg = Number(Math.max(98.500, finalMode - stdDev * 0.45).toFixed(3));
+
+      aiRecommendations = {
+        mode: { rate: finalMode, price: computeBidAmount(targetBase, targetAVal, targetLower, finalMode) },
+        safe: { rate: finalSafe, price: computeBidAmount(targetBase, targetAVal, targetLower, finalSafe) },
+        agg: { rate: finalAgg, price: computeBidAmount(targetBase, targetAVal, targetLower, finalAgg) }
+      };
+
+      $('aiModeRate').textContent = `${aiRecommendations.mode.rate.toFixed(3)}%`;
+      $('aiModePrice').textContent = `${formatNum(aiRecommendations.mode.price)} 원`;
+      $('aiModeDesc').textContent = `${cleanTarget ? cleanTarget + ' 가중 ' : ''}밀도 최고점 (평균 ${weightedMean.toFixed(3)}%)`;
+
+      $('aiSafeRate').textContent = `${aiRecommendations.safe.rate.toFixed(3)}%`;
+      $('aiSafePrice').textContent = `${formatNum(aiRecommendations.safe.price)} 원`;
+
+      $('aiAggRate').textContent = `${aiRecommendations.agg.rate.toFixed(3)}%`;
+      $('aiAggPrice').textContent = `${formatNum(aiRecommendations.agg.price)} 원`;
+
+      $('btnAiRateLabel').textContent = aiRecommendations.mode.rate.toFixed(3);
+      $('kdeStatsLabel').textContent = `학습 표본 ${records.length}건 · 가중평균 ${weightedMean.toFixed(3)}% · 표준편차 ±${stdDev.toFixed(3)}%`;
+
+      renderKdeChart(grid, maxDensity, weightedPoints, finalMode, finalSafe);
+    }
+
+    function renderKdeChart(grid, maxDensity, points, modeRate, safeRate) {
+      const W = 600, H = 105, padX = 24, padY = 14;
+      const minR = 98.5, maxR = 101.5;
+      const toX = r => padX + ((r - minR) / (maxR - minR)) * (W - padX * 2);
+      const toY = d => H - padY - (d / (maxDensity || 1)) * (H - padY * 2);
+
+      const pathPts = grid.map((g, idx) => `${idx === 0 ? 'M' : 'L'} ${toX(g.rate).toFixed(1)} ${toY(g.density).toFixed(1)}`).join(' ');
+      const areaPath = `${pathPts} L ${toX(maxR).toFixed(1)} ${H - padY} L ${toX(minR).toFixed(1)} ${H - padY} Z`;
+
+      const dots = points
+        .filter(p => p.rate >= minR && p.rate <= maxR)
+        .map(p => `<circle cx="${toX(p.rate).toFixed(1)}" cy="${H - padY}" r="${Math.min(4.5, 2 + p.weight)}" fill="#38bdf8" opacity="0.65" />`)
+        .join('');
+
+      const ticks = [98.5, 99.0, 99.5, 100.0, 100.5, 101.0, 101.5].map(t => `
+        <line x1="${toX(t)}" y1="${padY}" x2="${toX(t)}" y2="${H - padY}" stroke="#334155" stroke-width="1" stroke-dasharray="2,2" />
+        <text x="${toX(t)}" y="${H - 2}" fill="#94a3b8" font-size="9" text-anchor="middle">${t.toFixed(1)}%</text>
+      `).join('');
+
+      $('kdeChartContainer').innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" class="w-full h-full overflow-visible">
+          <defs>
+            <linearGradient id="kdeGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#6366f1" stop-opacity="0.55" />
+              <stop offset="100%" stop-color="#6366f1" stop-opacity="0.05" />
+            </linearGradient>
+          </defs>
+          ${ticks}
+          <path d="${areaPath}" fill="url(#kdeGrad)" />
+          <path d="${pathPts}" fill="none" stroke="#818cf8" stroke-width="2.5" />
+          ${dots}
+          <line x1="${toX(modeRate)}" y1="4" x2="${toX(modeRate)}" y2="${H - padY}" stroke="#f59e0b" stroke-width="2" />
+          <text x="${toX(modeRate)}" y="11" fill="#fbbf24" font-size="9.5" font-weight="bold" text-anchor="middle">최빈 ${modeRate.toFixed(3)}%</text>
+          <line x1="${toX(safeRate)}" y1="14" x2="${toX(safeRate)}" y2="${H - padY}" stroke="#10b981" stroke-width="1.5" stroke-dasharray="3,2" />
+        </svg>`;
+    }
+
+    function applyAiRecommendation(type) {
+      const rec = aiRecommendations[type];
+      if (!rec) return;
+      setRate(rec.rate);
+      $('finalBidText').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // =========================================================================
+    // [기능 3] 적격심사 및 투찰가 계산 로직
+    // =========================================================================
     function isBidClosedRealtime(bid) {
       if (bid.isClosed) return true;
       const d = String(bid.deadline || "").replace(/\D/g, "");
       if (d.length >= 12) return new Date(+d.slice(0,4), +d.slice(4,6)-1, +d.slice(6,8), +d.slice(8,10), +d.slice(10,12)).getTime() < Date.now();
       if (d.length === 8) return new Date(+d.slice(0,4), +d.slice(4,6)-1, +d.slice(6,8), 23, 59).getTime() < Date.now();
       return false;
+    }
+
+    function isRegionAllowedForPaju(regionStr) {
+      const r = String(regionStr || "").trim();
+      if (!r || r === "공고문 참조" || r === "제한없음") return true;
+      return r.split(/[,/]/).map(t => t.trim()).filter(Boolean)
+        .some(tok => tok.includes("전국") || tok.includes("파주") || tok === "경기도" || tok === "경기");
     }
 
     function evaluateBidClient(bid) {
@@ -366,8 +963,8 @@
       } else {
         const [tierName, maxExp, maxMgmt, perfMult, priceCoeff] =
           estPrice < 200000000 ? ["적격심사 (2억 미만)", 0, 10, 0, 20] :
-          estPrice < 300000000 ? ["적격심사 (2억~3억)", 5, 5, 0.5, 20] :
-          estPrice < 1000000000 ? ["적격심사 (3억~10억)", 10, 10, estPrice < 400000000 ? 0.5 : 1.0, 20] :
+          estPrice < 400000000 ? ["적격심사 (2억~4억)", 5, 5, 0.5, 20] :
+          estPrice < 1000000000 ? ["적격심사 (4억~10억)", 10, 10, 1.0, 20] :
           ["적격심사 (10억~50억)", 15, 15, 2.0, 4];
 
         let earnedExp = 0, expDetail = "해당없음";
@@ -392,14 +989,13 @@
       }
 
       const isClosed = isBidClosedRealtime(bid);
-      const r = String(bid.region || "").trim();
-      const regionAllowed = !r || r === "공고문 참조" || r.includes("파주") || r.includes("경기") || r.includes("전국");
+      const regionAllowed = isRegionAllowedForPaju(bid.region);
       const eligible = bid.isWater && regionAllowed && qual.withinCapacity && qual.qualPass && !isClosed;
       const areaPrefix = bid.isPajuLocal ? "파주" : "경기";
 
       const [badge, badgeColor] =
         isClosed ? ["투찰마감", "bg-slate-200 text-slate-500"] :
-        !regionAllowed ? ["관외 지역제한", "bg-slate-200 text-slate-600"] :
+        !regionAllowed ? ["관외 시·군 제한", "bg-slate-200 text-slate-600"] :
         !bid.isWater ? ["파주 기타공사", "bg-slate-200 text-slate-600"] :
         !qual.withinCapacity ? ["시공능력 초과", "bg-rose-100 text-rose-700"] :
         !qual.qualPass ? ["적격점수 미달", "bg-rose-100 text-rose-700"] :
@@ -435,7 +1031,7 @@
       const cap = parseNum($('inputCompCap').value);
       if (cap <= 0) return alert("시공능력평가액을 0원보다 크게 입력해 주세요.");
       currentCompany = {
-        name: $('inputCompName').value.trim() || "드림건설",
+        name: $('inputCompName').value.trim() || "(주)드림건설",
         capacity_amount: cap,
         perf_3yr_amount: parseNum($('inputCompPerf').value),
         credit_grade: normalizeCreditGrade($('inputCompCredit').value)
@@ -479,11 +1075,15 @@
       $('countTotal').textContent = `${allBids.length}건`;
       $('countEligible').textContent = `${eligibleCnt}건`;
       $('countExcluded').textContent = `${allBids.length - eligibleCnt}건`;
-      renderBidList();
 
-      const pool = getFilteredBids().length ? getFilteredBids() : allBids;
+      const filtered = getFilteredBids();
+      const pool = filtered.length ? filtered : allBids;
       const target = (selectedBid && pool.find(b => b.id === selectedBid.id)) || pool[0];
-      if (target) selectBid(target.id);
+      if (target) {
+        selectBid(target.id);
+      } else {
+        renderBidList();
+      }
     }
 
     function renderBidList() {
@@ -549,12 +1149,14 @@
       $('basePriceInput').value = formatNum(selectedBid.basePrice);
       $('aValueInput').value = formatNum(selectedBid.aValue || 0);
       $('lowerRateInput').value = q.minPassBidRate.toFixed(3);
+      trainAndPredictOptimalBid();
       calculateBid();
     }
 
     function applyMinPassRate() {
       if (!selectedBid) return;
       $('lowerRateInput').value = selectedBid.qual.minPassBidRate.toFixed(3);
+      trainAndPredictOptimalBid();
       calculateBid();
     }
 
@@ -565,9 +1167,7 @@
       const rate = parseFloat($('rateNumberInput').value) || 100;
 
       const expected = Math.round(base * (rate / 100));
-      const finalBid = aVal > 0
-        ? Math.ceil((expected - aVal) * (lower / 100) + aVal)
-        : Math.ceil(expected * (lower / 100));
+      const finalBid = computeBidAmount(base, aVal, lower, rate);
 
       $('expectedPriceText').textContent = `${formatNum(expected)}원`;
       $('aValueFormulaNote').textContent = aVal > 0 ? `(A값 ${formatNum(aVal)}원 반영)` : '';
@@ -605,43 +1205,42 @@
 
     async function initDashboard() {
       try {
-        const res = await fetch(`./paju_bids.json?t=${Date.now()}`);
-        if (!res.ok) throw new Error();
-        const data = await res.json();
-        allBids = Array.isArray(data.bids) ? data.bids : [];
-        $('lastUpdatedText').textContent = `최근 자동 수집: ${data.updated_at || '방금 전'} (전국 ${data.total_scanned || 0}건 스캔 완료)`;
-        if (data.company) defaultCompany = { ...defaultCompany, ...data.company, credit_grade: normalizeCreditGrade(data.company.credit_grade) };
-      } catch {
-        allBids = fallbackBids;
-        $('statusBadge').textContent = '샘플 모드';
-        $('statusBadge').className = 'bg-amber-400 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded';
-        $('lastUpdatedText').textContent = 'paju_bids.json 대기 중 (GitHub Actions 실행 필요)';
-        $('fallbackBanner').classList.remove('hidden');
-      }
-
-      try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
         currentCompany = saved ? { ...defaultCompany, ...saved } : { ...defaultCompany };
       } catch {
         currentCompany = { ...defaultCompany };
       }
+      updateCompanyHeaderUI();
+
+      try {
+        const savedHist = JSON.parse(localStorage.getItem(HIST_STORAGE_KEY));
+        if (Array.isArray(savedHist)) customHistory = savedHist;
+      } catch {}
+
+      try {
+        const ghCfg = JSON.parse(localStorage.getItem(GH_STORAGE_KEY)) || {};
+        $('ghRepoInput').value = ghCfg.repo || detectGithubRepo();
+        $('ghTokenInput').value = ghCfg.token || '';
+      } catch {}
 
       ['inputCompCap', 'inputCompPerf', 'basePriceInput', 'aValueInput'].forEach(id => {
         $(id).addEventListener('input', e => {
           const n = parseNum(e.target.value);
           e.target.value = n ? formatNum(n) : '';
-          if (id === 'basePriceInput' || id === 'aValueInput') calculateBid();
+          if (id === 'basePriceInput' || id === 'aValueInput') {
+            trainAndPredictOptimalBid();
+            calculateBid();
+          }
         });
       });
 
       ['hideClosed', 'filterEligible', 'areaFilter'].forEach(id => $(id).addEventListener('change', renderBidList));
       $('searchInput').addEventListener('input', renderBidList);
-      $('lowerRateInput').addEventListener('input', calculateBid);
+      $('lowerRateInput').addEventListener('input', () => { trainAndPredictOptimalBid(); calculateBid(); });
       $('rateSlider').addEventListener('input', e => setRate(e.target.value));
       $('rateNumberInput').addEventListener('input', e => { $('rateSlider').value = e.target.value; calculateBid(); });
 
-      updateCompanyHeaderUI();
-      recalculateAllBids();
+      await refreshDashboardData(false);
       runLottery();
     }
 
