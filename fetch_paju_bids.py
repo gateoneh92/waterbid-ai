@@ -41,14 +41,15 @@ PAJU_KEYWORDS = (
 )
 
 GYEONGGI_KEYWORDS = (
-    "경기도", "수원시", "고양시", "용인시", "성남시", "화성시", "부천시", "남양주시", "안산시",
+    "경기도", "경기", "수원시", "고양시", "용인시", "성남시", "화성시", "부천시", "남양주시", "안산시",
     "평택시", "안양시", "시흥시", "김포시", "의정부시", "광주시", "하남시", "광명시", "군포시",
     "양주시", "오산시", "이천시", "안성시", "구리시", "의왕시", "포천시", "양평군", "여주시",
-    "동두천시", "과천시", "가평군", "연천군"
+    "동두천시", "과천시", "가평군", "연천군", "광암아리수", "서울대공원"
 )
 
+# 주의: 서울특별시·인천광역시는 경기도 소재 산하 사업소(과천·하남 등) 공고가 있으므로 제외하지 않고 참가가능지역으로 판정
 OTHER_PROVINCE_KEYWORDS = (
-    "광주지방조달청", "광주광역시", "광주전남", "서울특별시", "인천광역시",
+    "광주지방조달청", "광주광역시", "광주전남",
     "강원", "충청", "충북", "충남", "대전광역시", "세종",
     "전라", "전북", "전남", "여수", "순천", "목포", "광양", "나주", "무안", "해남", "영암", "화순",
     "경상", "경북", "경남", "대구광역시", "울산광역시", "부산광역시", "창원", "진주", "포항", "구미", "제주"
@@ -56,9 +57,9 @@ OTHER_PROVINCE_KEYWORDS = (
 
 WATER_KEYWORDS = (
     "상하수도", "상수도", "하수도", "상수관", "하수관", "관로", "급수", "배수", "오수", "우수관",
-    "우수받이", "맨홀", "송수", "정수장", "누수", "가압장", "관거", "용수로",
-    "하수처리", "배수지", "취수", "차집관", "측구", "암거", "집수정",
-    "유수율", "제수변", "소화전", "노후관", "오폐수",
+    "우수받이", "맨홀", "송수", "정수장", "정수센터", "정수", "활성탄", "여과", "누수", "가압장", "가압",
+    "관거", "용수로", "하수처리", "처리시설", "배수지", "취수", "차집관", "측구", "암거", "집수정",
+    "유수율", "제수변", "소화전", "노후관", "오폐수", "악취방지", "공기밸브", "배관", "급배수",
     "준설", "비점오염", "심정", "관정", "지하수"
 )
 
@@ -238,9 +239,6 @@ def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
 def update_historical_bids(now_kst: datetime):
     """
     과거 개찰결과를 최대 2년(730일)까지 자동 역추적 수집·누적합니다.
-    - 1회차 실행: 최근 1년(0~365일) 일괄 수집
-    - 2회차 실행: 과거 1~2년(365~730일) 이어받기 완료 (최대 2,000건 학습)
-    - 이후 실행: 최근 14일 신규 개찰결과만 빠르게 증분 업데이트
     """
     existing = {}
     fetched_days_depth = 0
@@ -259,7 +257,6 @@ def update_historical_bids(now_kst: datetime):
     batch_days = COMPANY_CONFIG["history_batch_days"]
     chunk_days = 15
 
-    # 1) API 활성 여부 사전 점검 (미신청 시 불필요한 대량 호출 방지)
     probe_start = (now_kst - timedelta(days=7)).strftime("%Y%m%d0000")
     probe_end = now_kst.strftime("%Y%m%d2359")
     try:
@@ -271,7 +268,6 @@ def update_historical_bids(now_kst: datetime):
                 json.dump({"updated_at": now_kst.strftime("%Y-%m-%d %H:%M"), "fetched_days_depth": 0, "records": []}, f, ensure_ascii=False, indent=2)
         return
 
-    # 2) 조회 구간 설정: 항상 최근 14일 + 아직 안 긁어온 과거 구간(1년 단위 최대 2년)
     ranges = [(0, 14)]
     next_depth = fetched_days_depth
     if fetched_days_depth < max_days:
@@ -305,7 +301,8 @@ def update_historical_bids(now_kst: datetime):
 
         title = str(it.get("bidNtceNm", ""))
         agency = str(it.get("dminsttNm") or it.get("ntceInsttNm") or "")
-        loc_text = f"{title} {agency}"
+        region_hint = str(it.get("prtcptPsblRgnNm") or it.get("cnstrtsiteRgnNm") or "")
+        loc_text = f"{title} {agency} {region_hint}"
         norm_title = normalize_text(title)
 
         if any(op in loc_text for op in OTHER_PROVINCE_KEYWORDS):
@@ -329,7 +326,6 @@ def update_historical_bids(now_kst: datetime):
             "openedAt": str(it.get("opengDt") or ""),
         }
 
-    # 개찰결과에 기초금액(bssamt)이 빠진 건은 기초금액 API에서 보완 조회
     missing_basis = [c for c in candidates.values() if c["basePrice"] <= 0]
     if missing_basis:
         with ThreadPoolExecutor(max_workers=6) as pool:
@@ -379,16 +375,17 @@ def update_historical_bids(now_kst: datetime):
     )
 
 
-def is_region_allowed_for_paju(region_str: str) -> bool:
+def is_region_allowed_for_paju(region_str: str, is_gyeonggi_site: bool = False) -> bool:
     r = str(region_str or "").strip()
     if not r or r in ("공고문 참조", "제한없음"):
-        return True
+        return is_gyeonggi_site
     if any(other in r for other in OTHER_PROVINCE_KEYWORDS):
         return False
-    return any(
-        ("전국" in tok or "파주" in tok or tok in ("경기도", "경기"))
-        for tok in (t.strip() for t in RE_SPLIT_REGION.split(r) if t.strip())
-    )
+    tokens = [t.strip() for t in RE_SPLIT_REGION.split(r) if t.strip()]
+    # 서울·인천 단독 제한 공고는 제외 (단, 경기도가 함께 명시되거나 전국 공고면서 현장이 경기인 경우 허용)
+    has_paju_or_gg = any(("파주" in tok or "경기" in tok) for tok in tokens)
+    has_nationwide = any(("전국" in tok) for tok in tokens)
+    return has_paju_or_gg or (has_nationwide and is_gyeonggi_site)
 
 
 def is_closed(deadline_str: str, now_kst: datetime) -> bool:
@@ -480,7 +477,7 @@ def main():
             continue
 
         is_gyeonggi_ok = is_paju_local or any(kw in loc_all for kw in GYEONGGI_KEYWORDS)
-        region_allowed = is_region_allowed_for_paju(region)
+        region_allowed = is_region_allowed_for_paju(region, is_gyeonggi_ok)
         is_water = ("상하수도" in norm_work_all) or (
             any(w in norm_work_all for w in WATER_KEYWORDS) and not any(ot in norm_field for ot in OTHER_TRADE_KEYWORDS)
         )
