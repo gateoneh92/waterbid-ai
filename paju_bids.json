@@ -1,13 +1,15 @@
 {
-  "updated_at": "2026-11-18 11:28",
+  "updated_at": "2026-11-18 11:38",
   "company": {
     "name": "(주)드림건설",
     "capacity_amount": 701470000,
     "perf_3yr_amount": 1281570000,
     "credit_grade": "BBB",
-    "search_days_back": 14
+    "search_days_back": 14,
+    "max_history_days": 730,
+    "history_batch_days": 365
   },
-  "total_scanned": 6100,
+  "total_scanned": 6107,
   "bids": [
     {
       "id": "R26BK01835585-000",
@@ -255,6 +257,44 @@
       "url": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01815041&bidPbancOrd=000",
       "isWater": true,
       "isPajuLocal": false
+    },
+    {
+      "id": "R26BK01838481-000",
+      "bidNo": "R26BK01838481-000",
+      "title": "금릉중 급식실 환기설비개선 기계설비공사",
+      "agency": "경기도교육청 경기도파주교육지원청",
+      "region": "경기도",
+      "mainField": "기계설비ㆍ가스공사업/6202",
+      "presmptPrice": 346771819,
+      "basePrice": 381449001,
+      "aValue": 0,
+      "isEstimatedBase": true,
+      "lowerRate": 89.745,
+      "contractMethod": "제한경쟁",
+      "deadline": "2026-11-26 10:00:00",
+      "isClosed": false,
+      "url": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01838481&bidPbancOrd=000",
+      "isWater": false,
+      "isPajuLocal": true
+    },
+    {
+      "id": "R26BK01838267-000",
+      "bidNo": "R26BK01838267-000",
+      "title": "선유중 급식실 환기설비개선 전기공사",
+      "agency": "경기도교육청 경기도파주교육지원청",
+      "region": "경기도 파주시",
+      "mainField": "전기공사업/0037",
+      "presmptPrice": 71978182,
+      "basePrice": 79176000,
+      "aValue": 0,
+      "isEstimatedBase": true,
+      "lowerRate": 89.745,
+      "contractMethod": "수의계약",
+      "deadline": "2026-11-24 10:00:00",
+      "isClosed": false,
+      "url": "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01838267&bidPbancOrd=000",
+      "isWater": false,
+      "isPajuLocal": true
     },
     {
       "id": "R26BK01837166-001",
