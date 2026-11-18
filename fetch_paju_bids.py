@@ -19,7 +19,9 @@ COMPANY_CONFIG = {
     "capacity_amount": 701_470_000,     # 시공능력평가액 (7억 147만 원)
     "perf_3yr_amount": 1_281_570_000,   # 최근 3년 상하수도 실적 (12억 8,157만 원)
     "credit_grade": "BBB",              # 신용등급 (A, BBB, BB0, BB-, B, CCC)
-    "search_days_back": 14,             # 게시일 기준 조회 기간 (일)
+    "search_days_back": 14,             # 진행 공고 게시일 기준 조회 기간 (일)
+    "max_history_days": 730,            # 과거 개찰결과 최대 학습 기간 (2년 = 730일)
+    "history_batch_days": 365,          # 1회 실행당 과거 역추적 수집 폭 (1년 = 365일)
 }
 
 SERVICE_KEY = unquote(os.environ.get("G2B_SERVICE_KEY", "").strip())
@@ -70,7 +72,6 @@ A_VALUE_FIELDS = (
     "rtrmzPayDdcAmt", "sftyMngmAmt", "qltyMngmAmt", "sftyChckMngmAmt"
 )
 
-# 사전 컴파일 정규식 (반복 루프 성능 최적화)
 RE_NORMALIZE = re.compile(r"[ㆍ·,\s]")
 RE_SPLIT_REGION = re.compile(r"[,/]")
 RE_NON_DIGIT = re.compile(r"\D")
@@ -170,6 +171,26 @@ def fetch_all_pages(endpoint: str, extra_params: dict, max_pages: int = 20) -> l
     return items
 
 
+def fetch_basis_only(bid_no: str, bid_ord: str = "000") -> int:
+    """개찰결과에 기초금액이 누락된 경우 기초금액 API에서 단건 조회합니다."""
+    params = {
+        "serviceKey": SERVICE_KEY,
+        "type": "json",
+        "inqryDiv": "2",
+        "bidNtceNo": bid_no,
+        "bidNtceOrd": bid_ord,
+        "numOfRows": "5",
+        "pageNo": "1",
+    }
+    try:
+        b_items = extract_items(parse_g2b_json(SESSION.get(BASIS_ENDPOINT, params=params, timeout=8)))
+        if b_items:
+            return parse_num(b_items[0].get("bssamt"))
+    except Exception:
+        pass
+    return 0
+
+
 def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
     """개별 공고의 기초금액, A값 합계, 참가가능지역, 업종제한사항을 조회합니다."""
     base_params = {
@@ -215,59 +236,147 @@ def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
 
 
 def update_historical_bids(now_kst: datetime):
-    """조달청 낙찰정보 API(활성화 시)에서 최근 14일 파주·경기 상하수도 개찰결과를 자동 누적합니다."""
+    """
+    과거 개찰결과를 최대 2년(730일)까지 자동 역추적 수집·누적합니다.
+    - 1회차 실행: 최근 1년(0~365일) 일괄 수집
+    - 2회차 실행: 과거 1~2년(365~730일) 이어받기 완료 (최대 2,000건 학습)
+    - 이후 실행: 최근 14일 신규 개찰결과만 빠르게 증분 업데이트
+    """
     existing = {}
+    fetched_days_depth = 0
     if os.path.exists("historical_bids.json"):
         try:
             with open("historical_bids.json", "r", encoding="utf-8") as f:
-                for rec in json.load(f).get("records", []):
+                saved = json.load(f)
+                fetched_days_depth = int(saved.get("fetched_days_depth", 0))
+                for rec in saved.get("records", []):
                     if rec.get("bidNo"):
                         existing[rec["bidNo"]] = rec
         except Exception:
             pass
 
-    start_dt = (now_kst - timedelta(days=14)).strftime("%Y%m%d0000")
-    end_dt = now_kst.strftime("%Y%m%d2359")
+    max_days = COMPANY_CONFIG["max_history_days"]
+    batch_days = COMPANY_CONFIG["history_batch_days"]
+    chunk_days = 15
 
+    # 1) API 활성 여부 사전 점검 (미신청 시 불필요한 대량 호출 방지)
+    probe_start = (now_kst - timedelta(days=7)).strftime("%Y%m%d0000")
+    probe_end = now_kst.strftime("%Y%m%d2359")
     try:
-        items, _ = fetch_page(OPENING_ENDPOINT, {"inqryBgnDt": start_dt, "inqryEndDt": end_dt}, 1, 500)
-        for it in items:
-            b_no = str(it.get("bidNtceNo", "")).strip()
-            title = str(it.get("bidNtceNm", ""))
-            agency = str(it.get("dminsttNm") or it.get("ntceInsttNm") or "")
-            loc_text = f"{title} {agency}"
-            norm_title = normalize_text(title)
+        probe_items, _ = fetch_page(OPENING_ENDPOINT, {"inqryBgnDt": probe_start, "inqryEndDt": probe_end}, 1, 50)
+    except Exception as e:
+        print(f"[안내] 낙찰정보 API 미연동 상태로 개찰 자동학습을 건너뜁니다: {e}")
+        if not os.path.exists("historical_bids.json"):
+            with open("historical_bids.json", "w", encoding="utf-8") as f:
+                json.dump({"updated_at": now_kst.strftime("%Y-%m-%d %H:%M"), "fetched_days_depth": 0, "records": []}, f, ensure_ascii=False, indent=2)
+        return
 
-            if any(op in loc_text for op in OTHER_PROVINCE_KEYWORDS):
-                continue
-            if not any(kw in loc_text for kw in PAJU_KEYWORDS + GYEONGGI_KEYWORDS):
-                continue
-            if not any(wk in norm_title for wk in WATER_KEYWORDS):
-                continue
+    # 2) 조회 구간 설정: 항상 최근 14일 + 아직 안 긁어온 과거 구간(1년 단위 최대 2년)
+    ranges = [(0, 14)]
+    next_depth = fetched_days_depth
+    if fetched_days_depth < max_days:
+        back_start = max(fetched_days_depth, 14)
+        back_end = min(fetched_days_depth + batch_days, max_days)
+        if back_end > back_start:
+            ranges.append((back_start, back_end))
+            next_depth = back_end
 
-            base_amt = parse_num(it.get("bssamt"))
-            plan_amt = parse_num(it.get("plnprc"))
-            if base_amt > 0 and plan_amt > 0:
-                rate = round((plan_amt / base_amt) * 100, 4)
-                if 96.5 <= rate <= 103.5:
-                    existing[b_no] = {
-                        "bidNo": b_no,
-                        "agency": agency,
-                        "title": title,
-                        "basePrice": base_amt,
-                        "planPrice": plan_amt,
-                        "rate": rate,
-                        "source": "나라장터자동수집",
-                    }
-    except Exception:
-        pass
+    chunks = []
+    for r_start, r_end in ranges:
+        for offset in range(r_start, r_end, chunk_days):
+            s = (now_kst - timedelta(days=min(offset + chunk_days - 1, r_end))).strftime("%Y%m%d0000")
+            e = (now_kst - timedelta(days=offset)).strftime("%Y%m%d2359")
+            chunks.append((s, e))
 
-    records = sorted(existing.values(), key=lambda x: x.get("bidNo", ""), reverse=True)[:500]
+    raw_openings = list(probe_items)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [
+            pool.submit(fetch_all_pages, OPENING_ENDPOINT, {"inqryBgnDt": s, "inqryEndDt": e}, 15)
+            for s, e in chunks
+        ]
+        for fut in as_completed(futures):
+            raw_openings.extend(fut.result())
+
+    candidates = {}
+    for it in raw_openings:
+        b_no = str(it.get("bidNtceNo", "")).strip()
+        if not b_no or b_no in existing:
+            continue
+
+        title = str(it.get("bidNtceNm", ""))
+        agency = str(it.get("dminsttNm") or it.get("ntceInsttNm") or "")
+        loc_text = f"{title} {agency}"
+        norm_title = normalize_text(title)
+
+        if any(op in loc_text for op in OTHER_PROVINCE_KEYWORDS):
+            continue
+        if not any(kw in loc_text for kw in PAJU_KEYWORDS + GYEONGGI_KEYWORDS):
+            continue
+        if not any(wk in norm_title for wk in WATER_KEYWORDS):
+            continue
+
+        plan_amt = parse_num(it.get("plnprc"))
+        if plan_amt <= 0:
+            continue
+
+        candidates[b_no] = {
+            "bidNo": b_no,
+            "bidOrd": str(it.get("bidNtceOrd") or "000").strip(),
+            "agency": agency,
+            "title": title,
+            "basePrice": parse_num(it.get("bssamt")),
+            "planPrice": plan_amt,
+            "openedAt": str(it.get("opengDt") or ""),
+        }
+
+    # 개찰결과에 기초금액(bssamt)이 빠진 건은 기초금액 API에서 보완 조회
+    missing_basis = [c for c in candidates.values() if c["basePrice"] <= 0]
+    if missing_basis:
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            fut_to_no = {
+                pool.submit(fetch_basis_only, c["bidNo"], c["bidOrd"]): c["bidNo"]
+                for c in missing_basis
+            }
+            for fut in as_completed(fut_to_no):
+                b_no = fut_to_no[fut]
+                candidates[b_no]["basePrice"] = fut.result()
+
+    added_cnt = 0
+    for b_no, c in candidates.items():
+        base_amt = c["basePrice"]
+        plan_amt = c["planPrice"]
+        if base_amt > 0 and plan_amt > 0:
+            rate = round((plan_amt / base_amt) * 100, 4)
+            if 96.5 <= rate <= 103.5:
+                existing[b_no] = {
+                    "bidNo": b_no,
+                    "agency": c["agency"],
+                    "title": c["title"],
+                    "basePrice": base_amt,
+                    "planPrice": plan_amt,
+                    "rate": rate,
+                    "openedAt": c["openedAt"],
+                    "source": "나라장터자동수집",
+                }
+                added_cnt += 1
+
+    records = sorted(
+        existing.values(),
+        key=lambda x: (x.get("openedAt", ""), x.get("bidNo", "")),
+        reverse=True,
+    )[:2000]
+
     with open("historical_bids.json", "w", encoding="utf-8") as f:
         json.dump({
             "updated_at": now_kst.strftime("%Y-%m-%d %H:%M"),
+            "fetched_days_depth": next_depth,
             "records": records,
         }, f, ensure_ascii=False, indent=2)
+
+    print(
+        f"[개찰학습 누적깊이 {next_depth}/{max_days}일] 개찰 스캔 {len(raw_openings)}건 -> "
+        f"신규 {added_cnt}건 추가 (총 학습표본 {len(records)}건)"
+    )
 
 
 def is_region_allowed_for_paju(region_str: str) -> bool:
@@ -302,7 +411,6 @@ def main():
     now_kst = datetime.now(KST)
     days = COMPANY_CONFIG["search_days_back"]
 
-    # 전체 공사목록 API(LIST_ENDPOINT) 4일 단위 4구간 병렬 조회 (중복 검색 API 제거로 속도·안정성 최적화)
     chunks = [
         (
             (now_kst - timedelta(days=min(offset + 3, days))).strftime("%Y%m%d0000"),
@@ -321,7 +429,6 @@ def main():
                 if b_no and (b_no not in raw_map or b_ord >= str(raw_map[b_no].get("bidNtceOrd", "000"))):
                     raw_map[b_no] = item
 
-    # 1차 선별: 비수도권 배제 및 파주/상하수도 후보 추출
     preliminary = []
     for b_no, item in raw_map.items():
         title = str(item.get("bidNtceNm", "제목 없음"))
@@ -342,7 +449,6 @@ def main():
             closed = is_closed(item.get("bidClseDt", ""), now_kst)
             preliminary.append((b_no, item, closed, is_paju_local))
 
-    # 2차 상세 조회: 진행 중인 후보 공고만 기초금액·A값·참가가능지역·업종제한 조회
     open_prelim = [(b_no, it) for b_no, it, closed, _ in preliminary if not closed]
     detail_map = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -353,7 +459,6 @@ def main():
         for fut in as_completed(fut_to_no):
             detail_map[fut_to_no[fut]] = fut.result()
 
-    # 3차 최종 판정
     bids = []
     for b_no, item, closed, is_paju_local in preliminary:
         b_ord = str(item.get("bidNtceOrd") or "000").strip()
