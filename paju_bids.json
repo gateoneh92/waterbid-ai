@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-11-18 11:38",
+  "updated_at": "2026-11-18 11:40",
   "company": {
     "name": "(주)드림건설",
     "capacity_amount": 701470000,
@@ -9,7 +9,7 @@
     "max_history_days": 730,
     "history_batch_days": 365
   },
-  "total_scanned": 6107,
+  "total_scanned": 6109,
   "bids": [
     {
       "id": "R26BK01835585-000",
