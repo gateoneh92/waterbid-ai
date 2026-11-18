@@ -25,12 +25,18 @@ COMPANY_CONFIG = {
 }
 
 SERVICE_KEY = unquote(os.environ.get("G2B_SERVICE_KEY", "").strip())
-BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
+BASE_URL_V2 = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
+BASE_URL_V1 = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 SCSBID_URL = "https://apis.data.go.kr/1230000/as/ScsbidInfoService"
-LIST_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwk02"
-BASIS_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoCnstwkBasisAmount02"
-LICENSE_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoLicenseLimit02"
-REGION_ENDPOINT = f"{BASE_URL}/getBidPblancListInfoPrtcptPsblRgn02"
+
+LIST_ENDPOINT = f"{BASE_URL_V2}/getBidPblancListInfoCnstwk02"
+BASIS_ENDPOINT = f"{BASE_URL_V2}/getBidPblancListInfoCnstwkBasisAmount02"
+LICENSE_ENDPOINT = f"{BASE_URL_V2}/getBidPblancListInfoLicenseLimit02"
+REGION_ENDPOINT = f"{BASE_URL_V2}/getBidPblancListInfoPrtcptPsblRgn02"
+CALC_A_ENDPOINTS = (
+    f"{BASE_URL_V2}/getBidPblancListInfoBidPrceCalclA02",
+    f"{BASE_URL_V1}/getBidPblancListInfoBidPrceCalclA",
+)
 OPENING_ENDPOINT = f"{SCSBID_URL}/getOpengResultListInfoCnstwk"
 KST = timezone(timedelta(hours=9))
 
@@ -47,7 +53,6 @@ GYEONGGI_KEYWORDS = (
     "동두천시", "과천시", "가평군", "연천군", "광암아리수", "서울대공원"
 )
 
-# 주의: 서울특별시·인천광역시는 경기도 소재 산하 사업소(과천·하남 등) 공고가 있으므로 제외하지 않고 참가가능지역으로 판정
 OTHER_PROVINCE_KEYWORDS = (
     "광주지방조달청", "광주광역시", "광주전남",
     "강원", "충청", "충북", "충남", "대전광역시", "세종",
@@ -69,8 +74,16 @@ OTHER_TRADE_KEYWORDS = (
 )
 
 A_VALUE_FIELDS = (
-    "npnInsrprm", "mrfnHealthInsrprm", "odsnLngtrmRcprInsrprm",
-    "rtrmzPayDdcAmt", "sftyMngmAmt", "qltyMngmAmt", "sftyChckMngmAmt"
+    "npnInsrprm",             # 국민연금보험료
+    "mrfnHealthInsrprm",      # 국민건강보험료
+    "odsnLngtrmRcprInsrprm",  # 노인장기요양보험료
+    "rtrmzPayDdcAmt",         # 퇴직공제부금비
+    "sftyMngcst",             # 안전관리비(산업안전보건관리비)
+    "qltyMngcst",             # 품질관리비
+    "sftyChckMngcst",         # 안전점검비
+    "sftyMngmAmt",            # (구버전 호환) 안전관리비
+    "qltyMngmAmt",            # (구버전 호환) 품질관리비
+    "sftyChckMngmAmt",        # (구버전 호환) 안전점검비
 )
 
 RE_NORMALIZE = re.compile(r"[ㆍ·,\s]")
@@ -173,7 +186,6 @@ def fetch_all_pages(endpoint: str, extra_params: dict, max_pages: int = 20) -> l
 
 
 def fetch_basis_only(bid_no: str, bid_ord: str = "000") -> int:
-    """개찰결과에 기초금액이 누락된 경우 기초금액 API에서 단건 조회합니다."""
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -192,8 +204,34 @@ def fetch_basis_only(bid_no: str, bid_ord: str = "000") -> int:
     return 0
 
 
+def fetch_calc_a_value(bid_no: str, bid_ord: str) -> int:
+    """입찰가격산식A정보조회 전용 오퍼레이션에서 A값(국민연금·건강보험·안전관리비 등)을 합산합니다."""
+    for ep in CALC_A_ENDPOINTS:
+        for include_ord in (True, False):
+            params = {
+                "serviceKey": SERVICE_KEY,
+                "type": "json",
+                "inqryDiv": "2",
+                "bidNtceNo": bid_no,
+                "numOfRows": "10",
+                "pageNo": "1",
+            }
+            if include_ord and bid_ord:
+                params["bidNtceOrd"] = bid_ord
+            try:
+                items = extract_items(parse_g2b_json(SESSION.get(ep, params=params, timeout=8)))
+                if items:
+                    items.sort(key=lambda x: str(x.get("bidNtceOrd") or "000"), reverse=True)
+                    row = items[0]
+                    total_a = sum(max(parse_num(row.get(f)), 0) for f in A_VALUE_FIELDS)
+                    return total_a if total_a > 0 else 0
+            except Exception:
+                continue
+    return 0
+
+
 def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
-    """개별 공고의 기초금액, A값 합계, 참가가능지역, 업종제한사항을 조회합니다."""
+    """개별 공고의 기초금액, A값 합계(산식A API), 참가가능지역, 업종제한사항을 조회합니다."""
     base_params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
@@ -203,17 +241,17 @@ def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
         "numOfRows": "10",
         "pageNo": "1",
     }
-    basis, a_val = 0, 0
+    basis = 0
     regions, licenses = [], []
 
     try:
         b_items = extract_items(parse_g2b_json(SESSION.get(BASIS_ENDPOINT, params=base_params, timeout=8)))
         if b_items:
-            row = b_items[0]
-            basis = parse_num(row.get("bssamt"))
-            a_val = sum(max(parse_num(row.get(f)), 0) for f in A_VALUE_FIELDS)
+            basis = parse_num(b_items[0].get("bssamt"))
     except Exception:
         pass
+
+    a_val = fetch_calc_a_value(bid_no, bid_ord)
 
     try:
         r_items = extract_items(parse_g2b_json(SESSION.get(REGION_ENDPOINT, params=base_params, timeout=8)))
@@ -237,9 +275,6 @@ def fetch_bid_details(bid_no: str, bid_ord: str) -> tuple[int, int, str, str]:
 
 
 def update_historical_bids(now_kst: datetime):
-    """
-    과거 개찰결과를 최대 2년(730일)까지 자동 역추적 수집·누적합니다.
-    """
     existing = {}
     fetched_days_depth = 0
     if os.path.exists("historical_bids.json"):
@@ -382,7 +417,6 @@ def is_region_allowed_for_paju(region_str: str, is_gyeonggi_site: bool = False) 
     if any(other in r for other in OTHER_PROVINCE_KEYWORDS):
         return False
     tokens = [t.strip() for t in RE_SPLIT_REGION.split(r) if t.strip()]
-    # 서울·인천 단독 제한 공고는 제외 (단, 경기도가 함께 명시되거나 전국 공고면서 현장이 경기인 경우 허용)
     has_paju_or_gg = any(("파주" in tok or "경기" in tok) for tok in tokens)
     has_nationwide = any(("전국" in tok) for tok in tokens)
     return has_paju_or_gg or (has_nationwide and is_gyeonggi_site)
@@ -426,6 +460,7 @@ def main():
                 if b_no and (b_no not in raw_map or b_ord >= str(raw_map[b_no].get("bidNtceOrd", "000"))):
                     raw_map[b_no] = item
 
+    # 1차 선별: 파주 관내 여부와 무관하게 상하수도 신호가 있는 공고만 후보로 추출
     preliminary = []
     for b_no, item in raw_map.items():
         title = str(item.get("bidNtceNm", "제목 없음"))
@@ -442,7 +477,7 @@ def main():
             continue
 
         has_water_signal = ("상하수도" in norm_work) or any(w in norm_work for w in WATER_KEYWORDS)
-        if is_paju_local or has_water_signal:
+        if has_water_signal:
             closed = is_closed(item.get("bidClseDt", ""), now_kst)
             preliminary.append((b_no, item, closed, is_paju_local))
 
@@ -456,6 +491,7 @@ def main():
         for fut in as_completed(fut_to_no):
             detail_map[fut_to_no[fut]] = fut.result()
 
+    # 3차 최종 판정: 파주 관내 공고도 반드시 상하수도 관련 공고만 통과
     bids = []
     for b_no, item, closed, is_paju_local in preliminary:
         b_ord = str(item.get("bidNtceOrd") or "000").strip()
@@ -478,11 +514,18 @@ def main():
 
         is_gyeonggi_ok = is_paju_local or any(kw in loc_all for kw in GYEONGGI_KEYWORDS)
         region_allowed = is_region_allowed_for_paju(region, is_gyeonggi_ok)
-        is_water = ("상하수도" in norm_work_all) or (
-            any(w in norm_work_all for w in WATER_KEYWORDS) and not any(ot in norm_field for ot in OTHER_TRADE_KEYWORDS)
+
+        has_water_license = "상하수도" in norm_field
+        has_other_trade = any(ot in norm_field for ot in OTHER_TRADE_KEYWORDS)
+        is_water = has_water_license or (
+            ("상하수도" in norm_work_all or any(w in norm_work_all for w in WATER_KEYWORDS))
+            and not has_other_trade
         )
 
-        if not is_paju_local and not (is_gyeonggi_ok and region_allowed and is_water):
+        # 파주 관내 여부와 무관하게 상하수도 공고가 아니면 제외
+        if not is_water:
+            continue
+        if not is_paju_local and not (is_gyeonggi_ok and region_allowed):
             continue
 
         presmpt = parse_num(item.get("presmptPrce"))
@@ -506,13 +549,13 @@ def main():
             "deadline": item.get("bidClseDt", "마감일시 확인"),
             "isClosed": closed,
             "url": item.get("bidNtceDtlUrl") or "https://www.g2b.go.kr",
-            "isWater": is_water,
+            "isWater": True,
             "isPajuLocal": is_paju_local,
         })
 
-    bids.sort(key=lambda x: (not x["isClosed"], x["isWater"], x["isPajuLocal"], x["bidNo"]), reverse=True)
-    water_cnt = sum(1 for b in bids if b["isWater"])
-    open_water_cnt = sum(1 for b in bids if b["isWater"] and not b["isClosed"])
+    bids.sort(key=lambda x: (not x["isClosed"], x["isPajuLocal"], x["bidNo"]), reverse=True)
+    open_water_cnt = sum(1 for b in bids if not b["isClosed"])
+    a_found_cnt = sum(1 for b in bids if not b["isClosed"] and b["aValue"] > 0)
 
     with open("paju_bids.json", "w", encoding="utf-8") as f:
         json.dump({
@@ -526,7 +569,7 @@ def main():
 
     print(
         f"수집 완료 ({time.time() - t0:.1f}초): 전국 {len(raw_map)}건 -> "
-        f"파주·경기 대상 {len(bids)}건 (상하수도 {water_cnt}건 / 진행중 {open_water_cnt}건)"
+        f"파주·경기 상하수도 대상 {len(bids)}건 (진행중 {open_water_cnt}건 / A값 확인 {a_found_cnt}건)"
     )
 
 
